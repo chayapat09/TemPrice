@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StockData Management Dashboard</title>
+  <style>
+    /* ----------------------
+       Global Variables & Base Styles
+    ------------------------- */
+    :root {
+      --primary: #2563eb;
+      --primary-light: #3b82f6;
+      --secondary: #475569;
+      --success: #16a34a;
+      --danger: #dc2626;
+      --warning: #f59e0b;
+      --light: #f8fafc;
+      --dark: #1e293b;
+      --border: #e2e8f0;
+    }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f1f5f9;
+      color: var(--dark);
+    }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 1rem;
+    }
+    header {
+      background-color: #fff;
+      padding: 1rem;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      margin-bottom: 1.5rem;
+    }
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    h1, h2, h3 {
+      margin: 0;
+    }
+    /* ----------------------
+       Card, Grid & Table Styles
+    ------------------------- */
+    .card {
+      background-color: #fff;
+      border-radius: 0.5rem;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1rem;
+      margin-bottom: 1rem;
+    }
+    .grid {
+      display: grid;
+      gap: 1.5rem;
+    }
+    .stats-grid {
+      grid-template-columns: repeat(4, 1fr);
+    }
+    .stats-card {
+      padding: 1.5rem;
+      border-left: 4px solid var(--primary);
+      display: flex;
+      flex-direction: column;
+    }
+    .stats-label {
+      font-size: 0.875rem;
+      color: var(--secondary);
+      margin-bottom: 0.5rem;
+    }
+    .stats-value {
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+    .two-column {
+      grid-template-columns: 2fr 1fr;
+    }
+    .table-wrapper {
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      background-color: #f8fafc;
+      font-weight: 600;
+    }
+    /* ----------------------
+       Button & Badge Styles
+    ------------------------- */
+    .button {
+      display: inline-block;
+      padding: 0.5rem 1rem;
+      border-radius: 0.25rem;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background-color 0.2s;
+    }
+    .button-primary {
+      background-color: var(--primary);
+      color: #fff;
+      border: none;
+    }
+    .button-primary:hover {
+      background-color: var(--primary-light);
+    }
+    .button-outline {
+      background-color: #fff;
+      color: var(--primary);
+      border: 1px solid var(--primary);
+    }
+    .button-outline:hover {
+      background-color: #f8fafc;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.25rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge-success {
+      background-color: var(--success);
+      color: #fff;
+    }
+    .badge-warning {
+      background-color: var(--warning);
+      color: #fff;
+    }
+    .badge-danger {
+      background-color: var(--danger);
+      color: #fff;
+    }
+    /* ----------------------
+       Tab & Refresh Section Styles
+    ------------------------- */
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 1rem;
+    }
+    .tab {
+      padding: 0.75rem 1rem;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+    }
+    .tab.active {
+      border-bottom: 2px solid var(--primary);
+      color: var(--primary);
+      font-weight: 500;
+    }
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    .refresh-section {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+    }
+    .success-dot, .warning-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .success-dot {
+      background-color: var(--success);
+    }
+    .warning-dot {
+      background-color: var(--warning);
+    }
+    .progress {
+      height: 8px;
+      background-color: #e2e8f0;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 0.5rem;
+    }
+    .progress-bar {
+      height: 100%;
+      background-color: var(--primary);
+      width: 75%;
+    }
+    /* ----------------------
+       Chart & Visualization Styles
+    ------------------------- */
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .chart-title {
+      font-size: 22px;
+      font-weight: 600;
+      margin: 0;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    select, button {
+      padding: 8px 12px;
+      border-radius: 4px;
+      border: 1px solid #d1d5db;
+      background-color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    select:focus, button:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+    }
+    button {
+      background-color: #2563eb;
+      color: #fff;
+      border: none;
+      transition: background-color 0.2s;
+    }
+    button:hover {
+      background-color: #1d4ed8;
+    }
+    .timeframe-buttons {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 15px;
+    }
+    .timeframe-button {
+      padding: 6px 10px;
+      border-radius: 4px;
+      border: 1px solid #d1d5db;
+      background-color: #f9fafb;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+      color: #333;
+    }
+    .timeframe-button:hover {
+      background-color: #e2e8f0;
+    }
+    .timeframe-button.active {
+      background-color: #2563eb;
+      color: #fff;
+      border-color: #2563eb;
+      font-weight: 600;
+      box-shadow: 0 0 5px rgba(37, 99, 235, 0.5);
+    }
+    .chart-container {
+      position: relative;
+      height: 400px;
+      margin-bottom: 20px;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .stat-card {
+      background-color: #f9fafb;
+      border-radius: 6px;
+      padding: 15px;
+    }
+    .stat-label {
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 5px;
+    }
+    .stat-value {
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .positive {
+      color: #16a34a;
+    }
+    .negative {
+      color: #dc2626;
+    }
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    .data-table th {
+      background-color: #f9fafb;
+      text-align: left;
+      padding: 10px;
+      font-weight: 600;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .data-table td {
+      padding: 10px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .data-table th:not(:first-child),
+    .data-table td:not(:first-child) {
+      text-align: right;
+    }
+    .loading {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(255, 255, 255, 0.8);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 16px;
+      font-weight: 500;
+    }
+    .hidden {
+      display: none;
+    }
+    .pagination {
+      display: flex;
+      justify-content: center;
+      gap: 5px;
+      margin-top: 10px;
+    }
+    .pagination button {
+      padding: 5px 10px;
+      border-radius: 4px;
+      background-color: #f3f4f6;
+      color: #374151;
+      border: none;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    .pagination button.active {
+      background-color: #2563eb;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header>
+    <div class="container">
+      <div class="header-content">
+        <div>
+          <h1>StockData Management Dashboard</h1>
+        </div>
+        <div class="refresh-section">
+          <span class="success-dot"></span>
+          <span>Services Running</span>
+          <span style="margin-left: 1rem;">Last Cache Refresh: <strong id="last-cache-refresh">Loading...</strong></span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Dashboard Container -->
+  <div class="container">
+    <!-- System Status Cards -->
+    <div class="grid stats-grid">
+      <div class="card stats-card">
+        <span class="stats-label">Total Tickers</span>
+        <span class="stats-value" id="total-tickers">Loading...</span>
+      </div>
+      <div class="card stats-card" style="border-color: var(--success);">
+        <span class="stats-label">DB Size</span>
+        <span class="stats-value" id="db-size">Loading...</span>
+      </div>
+      <div class="card stats-card" style="border-color: var(--warning);">
+        <span class="stats-label">Cache Hit Rate</span>
+        <span class="stats-value" id="cache-hit-rate">Loading...</span>
+      </div>
+      <div class="card stats-card" style="border-color: var(--danger);">
+        <span class="stats-label">API Requests (24h)</span>
+        <span class="stats-value" id="api-requests-24h">Loading...</span>
+      </div>
+    </div>
+
+    <!-- Two-Column Layout for Main Content -->
+    <div class="grid two-column">
+      <!-- Left Column -->
+      <div>
+        <!-- Data Summary Card -->
+        <div class="card">
+          <div class="card-header">
+            <h2>Data Summary</h2>
+            <div>
+              <button class="button button-primary" id="global-delta-sync-btn">Run Delta Sync</button>
+              <button class="button button-outline" id="global-full-sync-btn" style="margin-left: 0.5rem;">Full Sync</button>
+            </div>
+          </div>
+          <div class="tabs">
+            <div class="tab active" data-tab="db-summary">Database Summary</div>
+            <div class="tab" data-tab="regions">Regions</div>
+            <div class="tab" data-tab="timeline">Timeline</div>
+          </div>
+          <div class="tab-content active" id="db-summary">
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Table</th>
+                    <th>Records</th>
+                    <th>Last Updated</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="db-summary-body">
+                  <!-- Data will be inserted here -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="tab-content" id="regions">
+            <div class="chart-container">
+              <div style="display: flex; height: 100%;">
+                <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 2rem;">
+                  <h3>Stock Distribution by Region</h3>
+                  <div style="margin: 2rem 0;" id="region-distribution">
+                    <!-- Data will be inserted here -->
+                  </div>
+                </div>
+                <div style="width: 250px; height: 250px; position: relative; align-self: center;" id="region-pie">
+                  <!-- Pie chart will be inserted here -->
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="tab-content" id="timeline">
+            <div class="chart-container">
+              <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; flex-direction: column;">
+                <div style="width: 100%; height: 250px; background: linear-gradient(180deg, rgba(219,234,254,0.3) 0%, rgba(219,234,254,0) 100%);">
+                  <svg viewBox="0 0 800 250" style="width: 100%; height: 100%;">
+                    <!-- Placeholder SVG content -->
+                  </svg>
+                </div>
+                <p style="margin-top: 1rem; font-size: 0.875rem; color: var(--secondary);">Database Growth Over Time (Records)</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Force Sync for Ticker -->
+        <div class="card">
+          <div class="card-header">
+            <h2>Force Sync for Ticker</h2>
+          </div>
+          <div style="margin-bottom: 1rem;">
+            <input type="text" id="sync-ticker-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px;">
+            <button class="button button-primary" id="force-full-sync-btn">Force Full Sync</button>
+            <button class="button button-outline" id="force-delta-sync-btn">Force Delta Sync</button>
+          </div>
+          <div id="sync-message" style="color: var(--success);"></div>
+        </div>
+
+        <!-- Top Ticker Traffic -->
+        <div class="card">
+          <div class="card-header">
+            <h2>Top 200 Ticker Traffic</h2>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Ticker</th>
+                  <th>Query Count</th>
+                </tr>
+              </thead>
+              <tbody id="ticker-traffic-body">
+                <!-- Data will be inserted here -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Unified Ticker Data Preview (Real Data from API) -->
+        <div class="card" id="unified-ticker-preview">
+          <div class="card-header">
+            <h2>Unified Ticker Data Preview</h2>
+          </div>
+          <div style="padding: 1rem;">
+            <!-- Ticker Search -->
+            <div style="margin-bottom: 1rem;">
+              <input type="text" id="ticker-search-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px;">
+              <button class="button button-primary" id="ticker-search-btn" style="margin-left: 0.5rem;">Search</button>
+            </div>
+            <!-- Chart Header with Data Type Selector -->
+            <div class="chart-header">
+              <h1 class="chart-title">Stock Price Chart</h1>
+              <div class="controls">
+                <label for="dataType">Data Type:</label>
+                <select id="dataType">
+                  <option value="close">Close Price</option>
+                  <option value="open">Open Price</option>
+                  <option value="high">High Price</option>
+                  <option value="low">Low Price</option>
+                </select>
+              </div>
+            </div>
+            <!-- Timeframe Buttons -->
+            <div class="timeframe-buttons">
+              <button class="timeframe-button active" data-days="30">1M</button>
+              <button class="timeframe-button" data-days="90">3M</button>
+              <button class="timeframe-button" data-days="180">6M</button>
+              <button class="timeframe-button" data-days="365">1Y</button>
+              <button class="timeframe-button" data-days="730">2Y</button>
+              <button class="timeframe-button" data-days="1825">5Y</button>
+              <button class="timeframe-button" data-days="all">All</button>
+            </div>
+            <!-- Chart Container -->
+            <div class="chart-container">
+              <canvas id="stockChart"></canvas>
+              <div id="loadingIndicator" class="loading hidden">
+                Loading chart data...
+              </div>
+            </div>
+            <!-- Stats Grid -->
+            <div class="stats-grid">
+              <div class="stat-card">
+                <div class="stat-label">Period High</div>
+                <div class="stat-value" id="periodHigh">$0.00</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Period Low</div>
+                <div class="stat-value" id="periodLow">$0.00</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Average Volume</div>
+                <div class="stat-value" id="avgVolume">0</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Period Change</div>
+                <div class="stat-value" id="periodChange">0.00%</div>
+              </div>
+            </div>
+            <!-- Data Table -->
+            <h2 style="margin-bottom: 10px;">Recent Price Data</h2>
+            <div style="overflow-x: auto;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Open</th>
+                    <th>High</th>
+                    <th>Low</th>
+                    <th>Close</th>
+                    <th>Volume</th>
+                    <th>Change %</th>
+                  </tr>
+                </thead>
+                <tbody id="dataTableBody">
+                  <!-- Data rows will be inserted here -->
+                </tbody>
+              </table>
+            </div>
+            <!-- Pagination -->
+            <div class="pagination" id="pagination">
+              <!-- Pagination buttons will be inserted here -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column -->
+      <div>
+        <!-- System Status Card -->
+        <div class="card">
+          <div class="card-header">
+            <h2>System Status</h2>
+          </div>
+          <div>
+            <div style="margin-bottom: 1.5rem;">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                <span>Database Connection</span>
+                <span style="display: flex; align-items: center;"><span class="success-dot"></span> Connected</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                <span>Latest Cache</span>
+                <span style="display: flex; align-items: center;"><span class="success-dot"></span> Updated</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                <span>Cache Size</span>
+                <span id="cache-size">Loading...</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                <span>Last Full Sync</span>
+                <span id="last-full-sync">Loading...</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                <span>Last Delta Sync</span>
+                <span id="last-delta-sync">Loading...</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                <span>Next Cache Refresh</span>
+                <span id="next-cache-refresh">Loading...</span>
+              </div>
+            </div>
+            <div style="margin-bottom: 1.5rem;">
+              <h3 style="margin-bottom: 1rem;">Scheduled Jobs</h3>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                <span>Cache Refresh</span>
+                <span>Every 5 minutes</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                <span>Delta Sync</span>
+                <span>Daily at 01:00</span>
+              </div>
+            </div>
+            <div>
+              <h3 style="margin-bottom: 1rem;">API Stats (24h)</h3>
+              <div id="api-stats">
+                <!-- API stats will be inserted here -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Data Quality Summary -->
+        <div class="card" id="data-quality-summary">
+          <div class="card-header">
+            <h2>Database Data Quality Summary</h2>
+          </div>
+          <div style="padding: 1rem;">
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th>Value</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="data-quality-body">
+                  <tr>
+                    <td>Total Tickers</td>
+                    <td id="dq-total-tickers">-</td>
+                    <td><span class="badge badge-success">Good</span></td>
+                  </tr>
+                  <tr>
+                    <td>Records Completeness</td>
+                    <td id="dq-completeness">-</td>
+                    <td><span class="badge badge-success">Good</span></td>
+                  </tr>
+                  <tr>
+                    <td>Missing Fields</td>
+                    <td id="dq-missing-fields">-</td>
+                    <td><span class="badge badge-warning">Warning</span></td>
+                  </tr>
+                  <tr>
+                    <td>Duplicate Entries</td>
+                    <td id="dq-duplicates">-</td>
+                    <td><span class="badge badge-danger">Attention</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- External Libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/luxon/3.0.1/luxon.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-adapter-luxon/1.2.0/chartjs-adapter-luxon.min.js"></script>
+
+  <script>
+    // ----------------------
+    // Dashboard Common Logic
+    // ----------------------
+    // Tab functionality
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+        const tabId = tab.getAttribute('data-tab');
+        document.getElementById(tabId).classList.add('active');
+      });
+    });
+
+    // Update cache information periodically
+    function updateCacheInfo() {
+      fetch('/api/cache_info')
+        .then(response => response.json())
+        .then(data => {
+          document.getElementById('last-cache-refresh').textContent =
+            data.last_cache_refresh ? new Date(data.last_cache_refresh).toLocaleString() : "Not yet refreshed";
+          document.getElementById('next-cache-refresh').textContent = data.next_cache_refresh;
+        })
+        .catch(err => console.error('Error fetching cache info:', err));
+    }
+    updateCacheInfo();
+    setInterval(updateCacheInfo, 60000);
+
+    // Fetch global stats and update dashboard cards
+    fetch('/api/stats')
+      .then(response => response.json())
+      .then(data => {
+        document.getElementById('total-tickers').textContent = data.total_tickers;
+        document.getElementById('db-size').textContent = data.db_size;
+        document.getElementById('cache-hit-rate').textContent = data.cache_hit_rate;
+        document.getElementById('api-requests-24h').textContent = data.api_requests_24h;
+        document.getElementById('cache-size').textContent = `${data.cache_size} tickers`;
+        document.getElementById('last-full-sync').textContent = data.last_full_sync || 'Never';
+        document.getElementById('last-delta-sync').textContent = data.last_delta_sync || 'Never';
+
+        // Populate Database Summary
+        const dbSummaryBody = document.getElementById('db-summary-body');
+        dbSummaryBody.innerHTML = '';
+        for (const [table, records] of Object.entries(data.table_records)) {
+          const row = `<tr>
+            <td>${table}</td>
+            <td>${records}</td>
+            <td>${data.last_delta_sync || 'Never'}</td>
+            <td><span class="badge badge-success">Up to date</span></td>
+          </tr>`;
+          dbSummaryBody.innerHTML += row;
+        }
+
+        // Populate Region Distribution
+        const regionDistribution = document.getElementById('region-distribution');
+        regionDistribution.innerHTML = '';
+        for (const [region, info] of Object.entries(data.region_distribution)) {
+          const div = `<div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+            <span>${region}</span>
+            <span>${info.count} (${info.percentage.toFixed(1)}%)</span>
+          </div>
+          <div class="progress">
+            <div class="progress-bar" style="width: ${info.percentage}%;"></div>
+          </div>`;
+          regionDistribution.innerHTML += div;
+        }
+
+        // Populate API Stats
+        const apiStats = document.getElementById('api-stats');
+        apiStats.innerHTML = '';
+        for (const [path, count] of Object.entries(data.api_stats)) {
+          const div = `<div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+            <span>${path}</span>
+            <span>${count} requests</span>
+          </div>`;
+          apiStats.innerHTML += div;
+        }
+      });
+
+    // Force Sync for Ticker
+    document.getElementById('force-full-sync-btn').addEventListener('click', () => {
+      const ticker = document.getElementById('sync-ticker-input').value;
+      fetch('/api/sync/full', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ticker: ticker})
+      })
+      .then(response => response.json())
+      .then(data => {
+        document.getElementById('sync-message').textContent = data.message || data.error;
+      })
+      .catch(err => document.getElementById('sync-message').textContent = 'Error: ' + err);
+    });
+    document.getElementById('force-delta-sync-btn').addEventListener('click', () => {
+      const ticker = document.getElementById('sync-ticker-input').value;
+      fetch('/api/sync/delta', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ticker: ticker})
+      })
+      .then(response => response.json())
+      .then(data => {
+        document.getElementById('sync-message').textContent = data.message || data.error;
+      })
+      .catch(err => document.getElementById('sync-message').textContent = 'Error: ' + err);
+    });
+
+    // Global Sync buttons for Data Summary
+    document.getElementById('global-delta-sync-btn').addEventListener('click', () => {
+      fetch('/api/sync/delta', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({})
+      })
+      .then(response => response.json())
+      .then(data => {
+        alert(data.message || data.error);
+        location.reload();
+      })
+      .catch(err => alert('Error: ' + err));
+    });
+    document.getElementById('global-full-sync-btn').addEventListener('click', () => {
+      fetch('/api/sync/full', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({})
+      })
+      .then(response => response.json())
+      .then(data => {
+        alert(data.message || data.error);
+        location.reload();
+      })
+      .catch(err => alert('Error: ' + err));
+    });
+
+    // Fetch Top Ticker Traffic
+    function fetchTickerTraffic() {
+      fetch('/api/ticker_traffic')
+        .then(response => response.json())
+        .then(data => {
+          const tbody = document.getElementById('ticker-traffic-body');
+          tbody.innerHTML = '';
+          data.forEach((item, index) => {
+            const row = `<tr>
+              <td>${index + 1}</td>
+              <td>${item.ticker}</td>
+              <td>${item.count}</td>
+            </tr>`;
+            tbody.innerHTML += row;
+          });
+        });
+    }
+    fetchTickerTraffic();
+    setInterval(fetchTickerTraffic, 60000);
+
+    // ----------------------
+    // Unified Ticker Data Preview Logic & Visualization
+    // ----------------------
+    let stockChart;
+    let fullData = [];
+    let displayData = [];
+    let currentPage = 1;
+    const rowsPerPage = 10;
+
+    // Fetch historical data via API (no fallback to mock data)
+    function fetchHistoricalData(ticker) {
+      fetch(`/api/unified?ticker=${ticker}`)
+        .then(response => response.json())
+        .then(data => {
+          fullData = data.historical_data;
+          fullData = fullData.map((item, index, arr) => {
+            if (index > 0) {
+              const prevClose = arr[index - 1].close;
+              item.change = parseFloat(((item.close - prevClose) / prevClose * 100).toFixed(2));
+            } else {
+              item.change = 0;
+            }
+            return item;
+          });
+          fullData.sort((a, b) => new Date(a.date) - new Date(b.date));
+          applyTimeframe(30);
+          updateChart();
+          updateStats();
+          updateDataTable();
+        })
+        .catch(err => {
+          console.error('Error fetching historical data:', err);
+          // Optionally, display an error message to the user here.
+        });
+    }
+
+    function applyTimeframe(days) {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - days);
+      const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
+      displayData = fullData.filter(item => item.date >= cutoffDateStr);
+    }
+
+    function updateChart() {
+      const dataType = document.getElementById('dataType').value;
+      const ctx = document.getElementById('stockChart').getContext('2d');
+      if (stockChart) {
+        stockChart.destroy();
+      }
+      document.getElementById('loadingIndicator').classList.remove('hidden');
+      setTimeout(() => {
+        stockChart = createLineChart(ctx, displayData, dataType);
+        document.getElementById('loadingIndicator').classList.add('hidden');
+      }, 100);
+    }
+
+    function createLineChart(ctx, data, dataType) {
+      const chartData = {
+        labels: data.map(item => item.date),
+        datasets: [{
+          label: dataType.charAt(0).toUpperCase() + dataType.slice(1) + ' Price',
+          data: data.map(item => item[dataType]),
+          borderColor: '#2563eb',
+          backgroundColor: 'rgba(37, 99, 235, 0.1)',
+          fill: true,
+          tension: 0.1,
+          pointRadius: data.length > 100 ? 0 : 2,
+          pointHoverRadius: 4
+        }]
+      };
+      return new Chart(ctx, {
+        type: 'line',
+        data: chartData,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: {
+            intersect: false,
+            mode: 'index'
+          },
+          scales: {
+            x: {
+              type: 'time',
+              time: { unit: getTimeUnit(data.length) },
+              ticks: { maxRotation: 0, autoSkip: true }
+            },
+            y: { beginAtZero: false }
+          },
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return `${context.dataset.label}: $${context.raw.toFixed(2)}`;
+                },
+                afterBody: function(tooltipItems) {
+                  const item = data[tooltipItems[0].dataIndex];
+                  return [
+                    `Open: $${item.open.toFixed(2)}`,
+                    `High: $${item.high.toFixed(2)}`,
+                    `Low: $${item.low.toFixed(2)}`,
+                    `Close: $${item.close.toFixed(2)}`,
+                    `Volume: ${item.volume.toLocaleString()}`
+                  ];
+                }
+              }
+            },
+            legend: { display: true }
+          }
+        }
+      });
+    }
+
+    function getTimeUnit(dataLength) {
+      if (dataLength <= 31) return 'day';
+      if (dataLength <= 90) return 'week';
+      if (dataLength <= 365) return 'month';
+      return 'quarter';
+    }
+
+    function updateStats() {
+      if (displayData.length === 0) return;
+      const maxPrice = Math.max(...displayData.map(item => item.high));
+      const minPrice = Math.min(...displayData.map(item => item.low));
+      const avgVolume = Math.round(displayData.reduce((sum, item) => sum + item.volume, 0) / displayData.length);
+      const firstPrice = displayData[0].open;
+      const lastPrice = displayData[displayData.length - 1].close;
+      const periodChange = ((lastPrice - firstPrice) / firstPrice * 100).toFixed(2);
+      document.getElementById('periodHigh').textContent = '$' + maxPrice.toFixed(2);
+      document.getElementById('periodLow').textContent = '$' + minPrice.toFixed(2);
+      document.getElementById('avgVolume').textContent = avgVolume.toLocaleString();
+      const changeElement = document.getElementById('periodChange');
+      changeElement.textContent = periodChange + '%';
+      changeElement.className = 'stat-value ' + (periodChange >= 0 ? 'positive' : 'negative');
+    }
+
+    function updateDataTable() {
+      const tableBody = document.getElementById('dataTableBody');
+      tableBody.innerHTML = '';
+      const displayDataReversed = [...displayData].reverse();
+      const startIndex = (currentPage - 1) * rowsPerPage;
+      const endIndex = Math.min(startIndex + rowsPerPage, displayDataReversed.length);
+      updatePagination(displayDataReversed.length);
+      const pageData = displayDataReversed.slice(startIndex, endIndex);
+      pageData.forEach(item => {
+        const row = document.createElement('tr');
+        const dateCell = document.createElement('td');
+        dateCell.textContent = item.date;
+        row.appendChild(dateCell);
+        const openCell = document.createElement('td');
+        openCell.textContent = '$' + item.open.toFixed(2);
+        row.appendChild(openCell);
+        const highCell = document.createElement('td');
+        highCell.textContent = '$' + item.high.toFixed(2);
+        row.appendChild(highCell);
+        const lowCell = document.createElement('td');
+        lowCell.textContent = '$' + item.low.toFixed(2);
+        row.appendChild(lowCell);
+        const closeCell = document.createElement('td');
+        closeCell.textContent = '$' + item.close.toFixed(2);
+        row.appendChild(closeCell);
+        const volumeCell = document.createElement('td');
+        volumeCell.textContent = item.volume.toLocaleString();
+        row.appendChild(volumeCell);
+        const changeCell = document.createElement('td');
+        changeCell.textContent = item.change + '%';
+        changeCell.className = item.change >= 0 ? 'positive' : 'negative';
+        row.appendChild(changeCell);
+        tableBody.appendChild(row);
+      });
+    }
+
+    function updatePagination(totalItems) {
+      const totalPages = Math.ceil(totalItems / rowsPerPage);
+      const paginationContainer = document.getElementById('pagination');
+      paginationContainer.innerHTML = '';
+      if (totalPages <= 1) return;
+      const prevButton = document.createElement('button');
+      prevButton.textContent = '«';
+      prevButton.disabled = currentPage === 1;
+      prevButton.addEventListener('click', () => {
+        if (currentPage > 1) {
+          currentPage--;
+          updateDataTable();
+        }
+      });
+      paginationContainer.appendChild(prevButton);
+      const maxButtons = 5;
+      let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+      let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+      if (endPage - startPage + 1 < maxButtons) {
+        startPage = Math.max(1, endPage - maxButtons + 1);
+      }
+      for (let i = startPage; i <= endPage; i++) {
+        const pageButton = document.createElement('button');
+        pageButton.textContent = i;
+        if (i === currentPage) {
+          pageButton.classList.add('active');
+        }
+        pageButton.addEventListener('click', () => {
+          currentPage = i;
+          updateDataTable();
+        });
+        paginationContainer.appendChild(pageButton);
+      }
+      const nextButton = document.createElement('button');
+      nextButton.textContent = '»';
+      nextButton.disabled = currentPage === totalPages;
+      nextButton.addEventListener('click', () => {
+        if (currentPage < totalPages) {
+          currentPage++;
+          updateDataTable();
+        }
+      });
+      paginationContainer.appendChild(nextButton);
+    }
+
+    // Initialize ticker preview on page load
+    document.addEventListener('DOMContentLoaded', function() {
+      const defaultTicker = 'AAPL';
+      fetchHistoricalData(defaultTicker);
+
+      // Ticker search functionality
+      document.getElementById('ticker-search-btn').addEventListener('click', () => {
+        const ticker = document.getElementById('ticker-search-input').value.trim();
+        if (ticker) {
+          currentPage = 1;
+          fetchHistoricalData(ticker);
+        }
+      });
+
+      // Update chart when data type changes
+      document.getElementById('dataType').addEventListener('change', () => {
+        updateChart();
+        updateStats();
+        updateDataTable();
+      });
+
+      // Timeframe button click handler
+      document.querySelectorAll('.timeframe-button').forEach(button => {
+        button.addEventListener('click', function() {
+          currentPage = 1;
+          document.querySelectorAll('.timeframe-button').forEach(btn => btn.classList.remove('active'));
+          this.classList.add('active');
+          const days = this.dataset.days;
+          if (days === 'all') {
+            displayData = [...fullData];
+          } else {
+            applyTimeframe(parseInt(days));
+          }
+          updateChart();
+          updateStats();
+          updateDataTable();
+        });
+      });
+    });
+  </script>
+</body>
+</html>
