@@ -14,6 +14,8 @@ from yfinance import EquityQuery
 
 # Logging Configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+import requests
+
 logger = logging.getLogger(__name__)
 
 # Configurable Parameters
