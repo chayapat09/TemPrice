@@ -11,6 +11,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import pandas as pd
 import yfinance as yf
 import requests
+from decimal import Decimal
 
 # Logging Configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -76,7 +77,7 @@ class AssetPrice(Base):
     high_price = Column(DECIMAL(10, 2))
     low_price = Column(DECIMAL(10, 2))
     close_price = Column(DECIMAL(10, 2))
-    volume = Column(BigInteger)
+    volume = Column(DECIMAL(20, 8))  # Changed from BigInteger to DECIMAL(20, 8)
 
 class DeltaSyncState(Base):
     __tablename__ = "delta_sync_state"
@@ -217,7 +218,7 @@ def update_stock_database(quotes_df, historical_data, upsert=False):
                 "high_price": safe_convert(data_row.get("High"), float),
                 "low_price": safe_convert(data_row.get("Low"), float),
                 "close_price": safe_convert(data_row.get("Close"), float),
-                "volume": safe_convert(data_row.get("Volume"), int)
+                "volume": safe_convert(data_row.get("Volume"), Decimal)  # Changed to Decimal
             }
             stock_price_mappings.append(mapping)
     if upsert:
@@ -338,7 +339,7 @@ def update_crypto_database(crypto_data, historical_data, upsert=False):
                 "high_price": safe_convert(data_row.get("high"), float),
                 "low_price": safe_convert(data_row.get("low"), float),
                 "close_price": safe_convert(data_row.get("close"), float),
-                "volume": safe_convert(data_row.get("volume"), int)
+                "volume": safe_convert(data_row.get("volume"), Decimal)  # Changed to Decimal
             }
             crypto_price_mappings.append(mapping)
     if upsert:
@@ -424,44 +425,64 @@ def safe_get(url, params=None, max_retries=5):
 
 def fetch_binance_crypto_data(symbol, start_date, end_date):
     logger.info(f"Fetching Binance historical data for {symbol}...")
-    if start_date:
-        start_ts = int(datetime.datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
-    else:
-        start_ts = int(datetime.datetime.now().timestamp() * 1000) - (5 * 365 * 24 * 60 * 60 * 1000)
-    if end_date:
-        end_ts = int(datetime.datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
-    else:
-        end_ts = int(datetime.datetime.now().timestamp() * 1000)
+    try:
+        if start_date:
+            start_ts = int(datetime.datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
+        else:
+            start_ts = int(datetime.datetime.now().timestamp() * 1000) - (5 * 365 * 24 * 60 * 60 * 1000)
+        if end_date:
+            end_ts = int(datetime.datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
+        else:
+            end_ts = int(datetime.datetime.now().timestamp() * 1000)
+    except Exception as e:
+        logger.error(f"Error processing dates for symbol {symbol}: {e}")
+        return pd.DataFrame()  # Return empty DataFrame if date processing fails
+
     limit = 1000
     klines = []
     current_start = start_ts
     url = BASE_BINANCE_URL + "/api/v3/klines"
+    
     while current_start < end_ts:
-        params = {
-            "symbol": symbol,
-            "interval": "1d",
-            "startTime": current_start,
-            "endTime": end_ts,
-            "limit": limit
-        }
-        response = safe_get(url, params=params)
-        data = response.json()
+        try:
+            params = {
+                "symbol": symbol,
+                "interval": "1d",
+                "startTime": current_start,
+                "endTime": end_ts,
+                "limit": limit
+            }
+            response = safe_get(url, params=params)
+            data = response.json()
+        except Exception as e:
+            logger.error(f"Error fetching data for symbol {symbol} starting at {current_start}: {e}")
+            break  # Skip further attempts for this symbol
+        
         if not data:
             break
+        
         klines.extend(data)
         last_time = data[-1][0]
         if last_time == current_start:
             break
         current_start = last_time + 1
         time.sleep(0.1)
+    
     if not klines:
         return pd.DataFrame()
-    df = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume", "close_time",
-                                       "quote_asset_volume", "num_trades", "taker_buy_base", "taker_buy_quote", "ignore"])
-    df["open_time"] = pd.to_datetime(df["open_time"], unit='ms')
-    df.set_index("open_time", inplace=True)
-    df = df.astype({"open": "float", "high": "float", "low": "float", "close": "float", "volume": "int"})
+    
+    try:
+        df = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume", "close_time",
+                                           "quote_asset_volume", "num_trades", "taker_buy_base", "taker_buy_quote", "ignore"])
+        df["open_time"] = pd.to_datetime(df["open_time"], unit='ms')
+        df.set_index("open_time", inplace=True)
+        df = df.astype({"open": "float", "high": "float", "low": "float", "close": "float", "volume": "float"})
+    except Exception as e:
+        logger.error(f"Error processing DataFrame for symbol {symbol}: {e}")
+        return pd.DataFrame()  # Return empty DataFrame if DataFrame processing fails
+    
     return df
+
 
 # --------------------------------------------------------------------
 # Data Source Classes for Latest Price Fetch
@@ -651,7 +672,7 @@ def get_unified_ticker():
                 "high": float(price.high_price) if price.high_price is not None else None,
                 "low": float(price.low_price) if price.low_price is not None else None,
                 "close": float(price.close_price) if price.close_price is not None else None,
-                "volume": price.volume,
+                "volume": float(price.volume) if price.volume is not None else None,  # Adjusted for Decimal
             }
             for price in prices
         ]
@@ -762,7 +783,7 @@ def get_historical():
             "high": float(price.high_price) if price.high_price is not None else None,
             "low": float(price.low_price) if price.low_price is not None else None,
             "close": float(price.close_price) if price.close_price is not None else None,
-            "volume": price.volume,
+            "volume": float(price.volume) if price.volume is not None else None,  # Adjusted for Decimal
         }
         data.append(record)
     return jsonify({"ticker": ticker, "asset_type": asset_type, "historical_data": data})
@@ -821,12 +842,9 @@ def sync_full():
     try:
         if ticker:
             if asset_type == "CRYPTO":
-                # For a specific crypto ticker, you may implement a dedicated force sync.
                 full_sync_crypto()
                 return jsonify({"message": f"Full sync for crypto ticker {ticker} completed."})
             else:
-                # Implement force sync for stock ticker if needed.
-                # For now, we assume a global stock sync.
                 full_sync_stocks()
                 return jsonify({"message": f"Full sync for stock ticker {ticker} completed."})
         else:
@@ -851,7 +869,6 @@ def sync_delta():
                 delta_sync_crypto()
                 return jsonify({"message": f"Delta sync for crypto ticker {ticker} completed."})
             else:
-                # Implement force delta sync for stock ticker if needed.
                 delta_sync_stocks()
                 return jsonify({"message": f"Delta sync for stock ticker {ticker} completed."})
         else:
@@ -884,9 +901,13 @@ if __name__ == "__main__":
     stock_quotes_count = session.query(StockQuote).count()
     crypto_quotes_count = session.query(CryptoQuote).count()
     session.close()
+    if stock_quotes_count == 0 or crypto_quotes_count == 0:
+        # Drop and recreate tables if either is empty
+        Base.metadata.drop_all(engine)
+        Base.metadata.create_all(engine)
     if stock_quotes_count == 0:
         logger.info("Stock database is empty. Running full sync for stocks...")
-        # full_sync_stocks()
+        full_sync_stocks()
     if crypto_quotes_count == 0:
         logger.info("Crypto database is empty. Running full sync for cryptocurrencies...")
         full_sync_crypto()
