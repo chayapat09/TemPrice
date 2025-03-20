@@ -21,10 +21,9 @@ logger = logging.getLogger(__name__)
 MAX_TICKERS_PER_REQUEST = 50
 REQUEST_DELAY_SECONDS = 5
 HISTORICAL_START_DATE = "2020-01-01"
-YFINANCE_REGION = "th"
 DATABASE_URL = "sqlite:///instance/stock_data.db"
 FLASK_HOST = "0.0.0.0"
-FLASK_PORT = 8080
+FLASK_PORT = 8082
 TOP_N_TICKERS = 100  # Number of top tickers to refresh periodically
 LATEST_CACHE_REFRESH_INTERVAL_MINUTES = 1  # Refresh interval for top tickers
 REGULAR_TTL = 15  # minutes, for existing tickers
@@ -230,7 +229,7 @@ def update_stock_database(quotes_df, historical_data, upsert=False):
 
 def full_sync_stocks():
     logger.info("Starting Full Sync for Stocks...")
-    query_th = yf.EquityQuery("eq", ["region", YFINANCE_REGION])
+    query_th = yf.EquityQuery("eq", ["region", "th"])
     quotes_df_th, historical_data_th = fetch_yf_data(MAX_TICKERS_PER_REQUEST, REQUEST_DELAY_SECONDS, query_th, start_date=HISTORICAL_START_DATE)
     query_us = yf.EquityQuery("is-in", ["exchange", "NMS", "NYQ"])
     quotes_df_us, historical_data_us = fetch_yf_data(MAX_TICKERS_PER_REQUEST, REQUEST_DELAY_SECONDS, query_us, start_date=HISTORICAL_START_DATE)
@@ -254,7 +253,7 @@ def delta_sync_stocks():
     session.close()
     today = datetime.datetime.now().date()
     two_days_ago = today - datetime.timedelta(days=2)
-    query_th = yf.EquityQuery("eq", ["region", YFINANCE_REGION])
+    query_th = yf.EquityQuery("eq", ["region", "th"])
     quotes_df_th, historical_data_th = fetch_yf_data(MAX_TICKERS_PER_REQUEST, REQUEST_DELAY_SECONDS, query_th, start_date=two_days_ago.strftime("%Y-%m-%d"), end_date=today.strftime("%Y-%m-%d"))
     query_us = yf.EquityQuery("is-in", ["exchange", "NMS", "NYQ"])
     quotes_df_us, historical_data_us = fetch_yf_data(MAX_TICKERS_PER_REQUEST, REQUEST_DELAY_SECONDS, query_us, start_date=two_days_ago.strftime("%Y-%m-%d"), end_date=today.strftime("%Y-%m-%d"))
@@ -835,7 +834,7 @@ def get_stats():
     last_full_sync = state.last_full_sync.isoformat() if state and state.last_full_sync else None
     last_delta_sync = state.last_delta_sync.isoformat() if state and state.last_delta_sync else None
     
-    db_file = 'instance/stock_data.db'
+    db_file = 'instance/pricing_data.db'
     db_size = os.path.getsize(db_file) / (1024 * 1024)
     db_size_str = f"{db_size:.2f} MB" if db_size < 1024 else f"{db_size / 1024:.2f} GB"
     
