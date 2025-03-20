@@ -507,6 +507,11 @@
               <input type="text" id="ticker-search-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px;">
               <button class="button button-primary" id="ticker-search-btn" style="margin-left: 0.5rem;">Search</button>
             </div>
+            <!-- Ticker Meta Data Preview -->
+            <div id="ticker-meta-preview" style="margin-bottom: 1rem; border: 1px solid #e2e8f0; padding: 1rem; border-radius: 0.25rem;">
+              <h3>Ticker Details</h3>
+              <div id="meta-data-content">Loading ticker details...</div>
+            </div>
             <!-- Chart Header with Data Type Selector -->
             <div class="chart-header">
               <h1 class="chart-title">Stock Price Chart</h1>
@@ -852,11 +857,25 @@
     let currentPage = 1;
     const rowsPerPage = 10;
 
-    // Fetch historical data via API (no fallback to mock data)
+    // Fetch historical data via API (and full ticker meta data)
     function fetchHistoricalData(ticker) {
       fetch(`/api/unified?ticker=${ticker}`)
         .then(response => response.json())
         .then(data => {
+          // Update the meta data section
+          const metaData = data.quote_data;
+          const cacheData = data.latest_cache;
+          const metaHtml = `
+            <p><strong>Ticker:</strong> ${metaData.ticker}</p>
+            <p><strong>Long Name:</strong> ${metaData.long_name}</p>
+            <p><strong>Exchange:</strong> ${metaData.exchange}</p>
+            <p><strong>Region:</strong> ${metaData.region}</p>
+            <p><strong>Currency:</strong> ${metaData.currency}</p>
+            <p><strong>Latest Price (Cache):</strong> ${cacheData.price} <small>at ${cacheData.timestamp}</small></p>
+          `;
+          document.getElementById('meta-data-content').innerHTML = metaHtml;
+
+          // Process historical data as before
           fullData = data.historical_data;
           fullData = fullData.map((item, index, arr) => {
             if (index > 0) {

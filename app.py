@@ -468,7 +468,7 @@ api_stats = Counter()
 # New API Endpoints for Dashboard
 # -------------------------------
 
-# Unified ticker endpoint: returns meta info and historical data for a selected ticker
+# Unified ticker endpoint: returns full meta info, latest cache, and historical data for a selected ticker
 @app.route("/api/unified")
 def get_unified_ticker():
     ticker = request.args.get("ticker")
@@ -480,11 +480,41 @@ def get_unified_ticker():
     session.close()
     if not quote:
         return jsonify({"error": "Ticker not found"}), 404
+
+    # Serialize full quote data
+    quote_data = {
+        "ticker": quote.ticker,
+        "language": quote.language,
+        "region": quote.region,
+        "quote_type": quote.quote_type,
+        "type_disp": quote.type_disp,
+        "quote_source_name": quote.quote_source_name,
+        "currency": quote.currency,
+        "exchange": quote.exchange,
+        "full_exchange_name": quote.full_exchange_name,
+        "exchange_timezone_name": quote.exchange_timezone_name,
+        "exchange_timezone_short_name": quote.exchange_timezone_short_name,
+        "gmt_offset_ms": quote.gmt_offset_ms,
+        "first_trade_date": quote.first_trade_date.strftime("%Y-%m-%d") if quote.first_trade_date else None,
+        "message_board_id": quote.message_board_id,
+        "long_name": quote.long_name,
+        "short_name": quote.short_name,
+        "display_name": quote.display_name,
+        "ipo_expected_date": quote.ipo_expected_date.strftime("%Y-%m-%d") if quote.ipo_expected_date else None,
+        "previous_name": quote.previous_name,
+        "name_change_date": quote.name_change_date.strftime("%Y-%m-%d") if quote.name_change_date else None,
+    }
+    # Get cache data for the ticker
+    cache_entry = latest_cache.get(ticker, (None, None))
+    latest_cache_data = {
+        "price": cache_entry[0],
+        "timestamp": cache_entry[1].isoformat() if cache_entry[1] else None
+    }
+
     unified_data = {
         "ticker": ticker,
-        "long_name": quote.long_name,
-        "exchange": quote.exchange,
-        "latest_price": latest_cache.get(ticker, (None, None))[0],
+        "quote_data": quote_data,
+        "latest_cache": latest_cache_data,
         "historical_data": [
             {
                 "date": price.price_date.strftime("%Y-%m-%d"),
@@ -524,7 +554,6 @@ def data_quality():
         "duplicates": duplicate_entries
     }
     return jsonify(data_quality_metrics)
-
 
 @app.route("/api/ticker_traffic")
 def ticker_traffic():
