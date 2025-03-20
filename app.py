@@ -12,6 +12,11 @@ import pandas as pd
 import yfinance as yf
 import requests
 from decimal import Decimal
+import os
+
+# Ensure the 'instance' directory exists
+if not os.path.exists('instance'):
+    os.makedirs('instance')
 
 # Logging Configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -589,16 +594,12 @@ def refresh_stock_top_n_tickers():
     logger.info(f"Refreshed latest prices for {len(top_tickers)} stock tickers.")
 
 def refresh_crypto_prices():
-    top_tickers = [ticker for (atype, ticker), _ in query_counter.most_common(TOP_N_TICKERS) if atype == "CRYPTO"]
-    if not top_tickers:
-        return
-    prices = CryptoDataSource.get_all_latest_prices()
+    prices = CryptoDataSource.get_all_latest_prices()  # Fetches prices for top 250 cryptocurrencies
     now = datetime.datetime.now()
-    for ticker in top_tickers:
-        price = prices.get(ticker, "NOT_FOUND")
+    for ticker, price in prices.items():
         key = ("CRYPTO", ticker)
         latest_cache[key] = (price, now)
-    logger.info(f"Refreshed latest prices for {len(top_tickers)} crypto tickers.")
+    logger.info(f"Refreshed latest prices for {len(prices)} crypto tickers.")
 
 def refresh_all_latest_prices():
     refresh_stock_top_n_tickers()
@@ -834,9 +835,13 @@ def get_stats():
     last_full_sync = state.last_full_sync.isoformat() if state and state.last_full_sync else None
     last_delta_sync = state.last_delta_sync.isoformat() if state and state.last_delta_sync else None
     
-    db_file = 'instance/pricing_data.db'
-    db_size = os.path.getsize(db_file) / (1024 * 1024)
-    db_size_str = f"{db_size:.2f} MB" if db_size < 1024 else f"{db_size / 1024:.2f} GB"
+    # Corrected database file path with existence check
+    db_file = os.path.join('instance', 'stock_data.db')
+    if os.path.exists(db_file):
+        db_size = os.path.getsize(db_file) / (1024 * 1024)  # Size in MB
+        db_size_str = f"{db_size:.2f} MB" if db_size < 1024 else f"{db_size / 1024:.2f} GB"
+    else:
+        db_size_str = "Database file not found"
     
     stats = {
         "total_stock_tickers": total_stock_tickers,
