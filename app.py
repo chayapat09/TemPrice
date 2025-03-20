@@ -27,7 +27,8 @@ FLASK_HOST = "0.0.0.0"
 FLASK_PORT = 8080
 TOP_N_TICKERS = 100  # Number of top tickers to refresh periodically
 LATEST_CACHE_REFRESH_INTERVAL_MINUTES = 1  # Refresh interval for top tickers
-CACHE_TTL_MINUTES = 15  # TTL for on-demand fetched tickers
+REGULAR_TTL = 15  # minutes, for existing tickers
+NOT_FOUND_TTL = 1440  # minutes (24 hours), for non-existent tickers
 QUERY_COUNTER_SAVE_INTERVAL_MINUTES = 5  # Save query counter every 5 minutes
 DELTA_SYNC_INTERVAL_DAYS = 1  # Delta sync interval (default daily)
 
@@ -45,7 +46,7 @@ class BaseQuote(Base):
     symbol = Column(String(20), nullable=False)
     name = Column(String(100), nullable=True)
 
-# Stock Quote Model – includes stock‐specific static fields
+# Stock Quote Model – includes stock-specific static fields
 class StockQuote(BaseQuote):
     __tablename__ = "stock_quotes"
     language = Column(String(10))
@@ -54,17 +55,16 @@ class StockQuote(BaseQuote):
     exchange = Column(String(50))
     full_exchange_name = Column(String(100))
     first_trade_date = Column(Date)
-    # (Add additional rarely changing fields as needed)
 
 # Crypto Quote Model – includes only static fields from CoinGecko metadata
 class CryptoQuote(BaseQuote):
     __tablename__ = "crypto_quotes"
     image = Column(String(200))
-    ath = Column(DECIMAL(15, 2))         # All-time high price (static until a new ATH is set)
+    ath = Column(DECIMAL(15, 2))         # All-time high price
     ath_date = Column(DateTime)
     atl = Column(DECIMAL(15, 2))         # All-time low price
     atl_date = Column(DateTime)
-    total_supply = Column(BigInteger)    # Generally static once set
+    total_supply = Column(BigInteger)    # Generally static
     max_supply = Column(BigInteger)
 
 # Unified Price Model for historical data (for both stocks and crypto)
@@ -77,7 +77,7 @@ class AssetPrice(Base):
     high_price = Column(DECIMAL(10, 2))
     low_price = Column(DECIMAL(10, 2))
     close_price = Column(DECIMAL(10, 2))
-    volume = Column(DECIMAL(20, 8))  # Changed from BigInteger to DECIMAL(20, 8)
+    volume = Column(DECIMAL(20, 8))  # Changed to DECIMAL for precision
 
 class DeltaSyncState(Base):
     __tablename__ = "delta_sync_state"
@@ -85,7 +85,7 @@ class DeltaSyncState(Base):
     last_full_sync = Column(DateTime)
     last_delta_sync = Column(DateTime)
 
-# Update QueryCount to use composite key for asset_type and ticker
+# QueryCount with composite key for asset_type and ticker
 class QueryCount(Base):
     __tablename__ = "query_counts"
     ticker = Column(String(50), primary_key=True)
@@ -97,7 +97,7 @@ engine = create_engine(DATABASE_URL, echo=False)
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 
-# For SQLite, add missing columns if necessary
+# Add missing columns for SQLite if necessary
 with engine.connect() as conn:
     try:
         conn.execute(text("ALTER TABLE delta_sync_state ADD COLUMN last_full_sync DATETIME"))
@@ -109,8 +109,7 @@ with engine.connect() as conn:
         pass
 
 # Global Cache and Query Counter
-# Use composite keys: (asset_type, ticker)
-latest_cache = {}  # Format: { (asset_type, ticker): (price, timestamp) }
+latest_cache = {}  # Format: { (asset_type, ticker): (price or "NOT_FOUND", timestamp) }
 query_counter = Counter()  # Tracks query frequency with key (asset_type, ticker)
 
 # Helper Functions
@@ -126,7 +125,6 @@ def chunk_list(lst, chunk_size):
     for i in range(0, len(lst), chunk_size):
         yield lst[i:i + chunk_size]
 
-# --------------------------------------------------------------------
 # Stock Data Fetching & Database Update (using yfinance)
 def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL_START_DATE, end_date=None, sample_size=None):
     logger.info("Starting data fetch from yfinance for stocks...")
@@ -218,7 +216,7 @@ def update_stock_database(quotes_df, historical_data, upsert=False):
                 "high_price": safe_convert(data_row.get("High"), float),
                 "low_price": safe_convert(data_row.get("Low"), float),
                 "close_price": safe_convert(data_row.get("Close"), float),
-                "volume": safe_convert(data_row.get("Volume"), Decimal)  # Changed to Decimal
+                "volume": safe_convert(data_row.get("Volume"), Decimal)
             }
             stock_price_mappings.append(mapping)
     if upsert:
@@ -273,7 +271,6 @@ def delta_sync_stocks():
     session.close()
     logger.info("Delta Sync for Stocks Completed.")
 
-# --------------------------------------------------------------------
 # Crypto Data Fetching & Database Update
 def fetch_coingecko_data():
     logger.info("Fetching crypto metadata from CoinGecko...")
@@ -324,7 +321,6 @@ def update_crypto_database(crypto_data, historical_data, upsert=False):
     else:
         session.bulk_insert_mappings(CryptoQuote, crypto_quote_mappings)
         session.commit()
-    # Update crypto historical data (fetched from Binance)
     crypto_price_mappings = []
     for ticker, df in historical_data.items():
         if df is None or df.empty:
@@ -339,7 +335,7 @@ def update_crypto_database(crypto_data, historical_data, upsert=False):
                 "high_price": safe_convert(data_row.get("high"), float),
                 "low_price": safe_convert(data_row.get("low"), float),
                 "close_price": safe_convert(data_row.get("close"), float),
-                "volume": safe_convert(data_row.get("volume"), Decimal)  # Changed to Decimal
+                "volume": safe_convert(data_row.get("volume"), Decimal)
             }
             crypto_price_mappings.append(mapping)
     if upsert:
@@ -354,7 +350,6 @@ def update_crypto_database(crypto_data, historical_data, upsert=False):
 def full_sync_crypto():
     logger.info("Starting Full Sync for Cryptocurrencies...")
     crypto_data = fetch_coingecko_data()
-    # For historical data, assume Binance symbol = coin symbol (upper case) + "USDT"
     historical_data = {}
     for coin in crypto_data:
         coin_id = coin.get("id")
@@ -436,7 +431,7 @@ def fetch_binance_crypto_data(symbol, start_date, end_date):
             end_ts = int(datetime.datetime.now().timestamp() * 1000)
     except Exception as e:
         logger.error(f"Error processing dates for symbol {symbol}: {e}")
-        return pd.DataFrame()  # Return empty DataFrame if date processing fails
+        return pd.DataFrame()
 
     limit = 1000
     klines = []
@@ -456,7 +451,7 @@ def fetch_binance_crypto_data(symbol, start_date, end_date):
             data = response.json()
         except Exception as e:
             logger.error(f"Error fetching data for symbol {symbol} starting at {current_start}: {e}")
-            break  # Skip further attempts for this symbol
+            break
         
         if not data:
             break
@@ -479,12 +474,10 @@ def fetch_binance_crypto_data(symbol, start_date, end_date):
         df = df.astype({"open": "float", "high": "float", "low": "float", "close": "float", "volume": "float"})
     except Exception as e:
         logger.error(f"Error processing DataFrame for symbol {symbol}: {e}")
-        return pd.DataFrame()  # Return empty DataFrame if DataFrame processing fails
+        return pd.DataFrame()
     
     return df
 
-
-# --------------------------------------------------------------------
 # Data Source Classes for Latest Price Fetch
 class StockDataSource:
     @staticmethod
@@ -492,9 +485,11 @@ class StockDataSource:
         try:
             data = yf.Ticker(ticker)
             return data.fast_info["last_price"]
+        except KeyError:
+            return "NOT_FOUND"  # Ticker does not exist
         except Exception as e:
             logger.error(f"Error fetching latest price for stock {ticker}: {e}")
-            return None
+            return None  # Other errors (e.g., network)
 
     @staticmethod
     def refresh_latest_prices(tickers):
@@ -506,6 +501,8 @@ class StockDataSource:
                 try:
                     price = data.tickers[ticker].fast_info["last_price"]
                     prices[ticker] = price
+                except KeyError:
+                    prices[ticker] = "NOT_FOUND"
                 except Exception as e:
                     logger.error(f"Error fetching latest price for stock {ticker}: {e}")
             return prices
@@ -542,42 +539,66 @@ class CryptoDataSource:
     @staticmethod
     def get_latest_price(ticker):
         prices = CryptoDataSource.get_all_latest_prices()
-        return prices.get(ticker)
+        return prices.get(ticker, "NOT_FOUND")
 
 # Global latest price function (delegates by asset_type)
 def get_latest_price(ticker, asset_type="STOCK"):
-    key = (asset_type, ticker)
+    key = (asset_type.upper(), ticker)
     query_counter[key] += 1
+    now = datetime.datetime.now()
+    
+    # Check cache
     if key in latest_cache:
-        price, timestamp = latest_cache[key]
-        if (datetime.datetime.now() - timestamp).total_seconds() / 60 < CACHE_TTL_MINUTES:
-            return price
+        value, timestamp = latest_cache[key]
+        if value == "NOT_FOUND":
+            if (now - timestamp).total_seconds() / 60 < NOT_FOUND_TTL:
+                return "NOT_FOUND"
+        elif value is not None:
+            if (now - timestamp).total_seconds() / 60 < REGULAR_TTL:
+                return value
+    
+    # Fetch from data source
     if asset_type.upper() == "STOCK":
         price = StockDataSource.get_latest_price(ticker)
     else:
         price = CryptoDataSource.get_latest_price(ticker)
-    latest_cache[key] = (price, datetime.datetime.now())
-    return price
+    
+    # Update cache and return
+    if price == "NOT_FOUND":
+        latest_cache[key] = ("NOT_FOUND", now)
+        return "NOT_FOUND"
+    elif price is not None:
+        latest_cache[key] = (price, now)
+        return price
+    else:
+        # Error fetching (e.g., network issue)
+        if key in latest_cache:
+            value, _ = latest_cache[key]
+            if value != "NOT_FOUND":
+                return value  # Fallback to expired price if not "NOT_FOUND"
+        return "FETCH_ERROR"
 
 def refresh_stock_top_n_tickers():
-    top_tickers = [ticker for (atype, ticker), _ in query_counter.items() if atype == "STOCK"]
+    top_tickers = [ticker for (atype, ticker), _ in query_counter.most_common(TOP_N_TICKERS) if atype == "STOCK"]
     for batch in chunk_list(top_tickers, MAX_TICKERS_PER_REQUEST):
         prices = StockDataSource.refresh_latest_prices(batch)
+        now = datetime.datetime.now()
         for ticker, price in prices.items():
             key = ("STOCK", ticker)
-            latest_cache[key] = (price, datetime.datetime.now())
+            latest_cache[key] = (price, now)  # Cache "NOT_FOUND" or price
         time.sleep(REQUEST_DELAY_SECONDS)
     logger.info(f"Refreshed latest prices for {len(top_tickers)} stock tickers.")
 
 def refresh_crypto_prices():
-    top_tickers = [ticker for (atype, ticker), _ in query_counter.items() if atype == "CRYPTO"]
+    top_tickers = [ticker for (atype, ticker), _ in query_counter.most_common(TOP_N_TICKERS) if atype == "CRYPTO"]
     if not top_tickers:
         return
     prices = CryptoDataSource.get_all_latest_prices()
+    now = datetime.datetime.now()
     for ticker in top_tickers:
-        if ticker in prices:
-            key = ("CRYPTO", ticker)
-            latest_cache[key] = (prices[ticker], datetime.datetime.now())
+        price = prices.get(ticker, "NOT_FOUND")
+        key = ("CRYPTO", ticker)
+        latest_cache[key] = (price, now)
     logger.info(f"Refreshed latest prices for {len(top_tickers)} crypto tickers.")
 
 def refresh_all_latest_prices():
@@ -607,9 +628,7 @@ def load_query_counter():
     session.close()
     logger.info("Loaded query_counter from database.")
 
-# --------------------------------------------------------------------
 # Flask API Endpoints and Dashboard
-
 app = Flask(__name__)
 api_stats = Counter()
 
@@ -628,7 +647,6 @@ def get_unified_ticker():
     session.close()
     if not quote:
         return jsonify({"error": "Ticker not found"}), 404
-    # Serialize metadata
     quote_data = {
         "ticker": quote.ticker,
         "asset_type": asset_type,
@@ -672,7 +690,7 @@ def get_unified_ticker():
                 "high": float(price.high_price) if price.high_price is not None else None,
                 "low": float(price.low_price) if price.low_price is not None else None,
                 "close": float(price.close_price) if price.close_price is not None else None,
-                "volume": float(price.volume) if price.volume is not None else None,  # Adjusted for Decimal
+                "volume": float(price.volume) if price.volume is not None else None,
             }
             for price in prices
         ]
@@ -733,12 +751,21 @@ def get_latest():
     asset_type = request.args.get("asset_type", "STOCK").upper()
     if not ticker:
         return jsonify({"error": "Ticker parameter is required"}), 400
-    price = get_latest_price(ticker, asset_type)
+    
+    result = get_latest_price(ticker, asset_type)
     key = (asset_type, ticker)
     timestamp = latest_cache.get(key, (None, datetime.datetime.now()))[1]
-    if price is not None:
-        return jsonify({"ticker": ticker, "asset_type": asset_type, "price": price, "timestamp": timestamp.isoformat()})
-    else:
+    
+    if isinstance(result, (int, float)):
+        return jsonify({
+            "ticker": ticker,
+            "asset_type": asset_type,
+            "price": result,
+            "timestamp": timestamp.isoformat()
+        })
+    elif result == "NOT_FOUND":
+        return jsonify({"error": "Ticker not found"}), 404
+    else:  # "FETCH_ERROR"
         return jsonify({"error": "Unable to fetch latest price"}), 500
 
 @app.route("/api/assets")
@@ -783,7 +810,7 @@ def get_historical():
             "high": float(price.high_price) if price.high_price is not None else None,
             "low": float(price.low_price) if price.low_price is not None else None,
             "close": float(price.close_price) if price.close_price is not None else None,
-            "volume": float(price.volume) if price.volume is not None else None,  # Adjusted for Decimal
+            "volume": float(price.volume) if price.volume is not None else None,
         }
         data.append(record)
     return jsonify({"ticker": ticker, "asset_type": asset_type, "historical_data": data})
@@ -816,7 +843,7 @@ def get_stats():
         "total_stock_tickers": total_stock_tickers,
         "total_crypto_tickers": total_crypto_tickers,
         "db_size": db_size_str,
-        "cache_hit_rate": "100%",
+        "cache_hit_rate": "100%",  # Placeholder
         "api_requests_24h": sum(api_stats.values()),
         "table_records": {
             "stock_quotes": total_stock_tickers,
@@ -902,7 +929,6 @@ if __name__ == "__main__":
     crypto_quotes_count = session.query(CryptoQuote).count()
     session.close()
     if stock_quotes_count == 0 or crypto_quotes_count == 0:
-        # Drop and recreate tables if either is empty
         Base.metadata.drop_all(engine)
         Base.metadata.create_all(engine)
     if stock_quotes_count == 0:
