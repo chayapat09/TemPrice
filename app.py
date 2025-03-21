@@ -3,8 +3,8 @@ import time
 import logging
 import os
 from collections import Counter
-from flask import Flask, jsonify, request, render_template
-from sqlalchemy import BigInteger, Column, Date, DateTime, DECIMAL, Integer, String, create_engine, func, text
+from flask import Flask, jsonify, request, render_template, current_app
+from sqlalchemy import BigInteger, Column, Date, DateTime, DECIMAL, Integer, String, create_engine, func, text, case
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -12,7 +12,8 @@ import pandas as pd
 import yfinance as yf
 import requests
 from decimal import Decimal
-import os
+from rapidfuzz import fuzz  # for fuzzy matching
+from sqlalchemy.exc import SQLAlchemyError
 
 # Ensure the 'instance' directory exists
 if not os.path.exists('instance'):
@@ -107,9 +108,10 @@ with engine.connect() as conn:
     except Exception:
         pass
 
-# Global Cache and Query Counter
+# Global Cache, Query Counter, and Baseline for last saved counts
 latest_cache = {}
 query_counter = Counter()
+last_saved_counts = {}  # This dictionary holds the last saved count for each key
 
 # Helper Functions
 def safe_convert(value, convert_func=lambda x: x):
@@ -554,6 +556,7 @@ class CryptoDataSource:
 
 def get_latest_price(ticker, asset_type="STOCK"):
     key = (asset_type.upper(), ticker)
+    # Increment the counter on each /api/latest call
     query_counter[key] += 1
     now = datetime.datetime.now()
     if key in latest_cache:
@@ -595,22 +598,30 @@ def refresh_all_latest_prices():
     global last_cache_refresh
     last_cache_refresh = datetime.datetime.now()
 
-def save_query_counter():
-    session = Session()
-    for (ticker, asset_type), count in query_counter.items():
-        existing = session.query(QueryCount).filter_by(ticker=ticker, asset_type=asset_type).first()
-        if existing:
-            existing.count += count
-        else:
-            session.add(QueryCount(ticker=ticker, asset_type=asset_type, count=count))
-    session.commit()
-    session.close()
-
 def load_query_counter():
     session = Session()
     query_counts = session.query(QueryCount).all()
     for qc in query_counts:
-        query_counter[(qc.ticker, qc.asset_type)] = qc.count
+        key = (qc.ticker, qc.asset_type)
+        query_counter[key] = qc.count
+        last_saved_counts[key] = qc.count
+    session.close()
+
+def save_query_counter():
+    session = Session()
+    # For each key in our in-memory counter, compute the delta since last save
+    for (ticker, asset_type), current_count in query_counter.items():
+        key = (ticker, asset_type)
+        baseline = last_saved_counts.get(key, 0)
+        delta = current_count - baseline
+        if delta > 0:
+            existing = session.query(QueryCount).filter_by(ticker=ticker, asset_type=asset_type).first()
+            if existing:
+                existing.count += delta
+            else:
+                session.add(QueryCount(ticker=ticker, asset_type=asset_type, count=current_count))
+            last_saved_counts[key] = current_count
+    session.commit()
     session.close()
 
 # Flask Application
@@ -704,9 +715,10 @@ def data_quality():
     }
     return jsonify(data_quality_metrics)
 
+# Updated ticker traffic endpoint with sorted ranking using most_common()
 @app.route("/api/ticker_traffic")
 def ticker_traffic():
-    data = [{"ticker": t[1], "asset_type": t[0], "count": count} for (t, count) in query_counter.items()]
+    data = [{"ticker": t[1], "asset_type": t[0], "count": count} for t, count in query_counter.most_common()]
     return jsonify(data)
 
 @app.route("/api/cache_info")
@@ -843,54 +855,76 @@ def get_stats():
     }
     return jsonify(stats)
 
-from sqlalchemy import case
-
-from sqlalchemy import case
-from flask import jsonify, request
-
+# Enhanced /api/tickers endpoint with optional fuzzy matching, pagination, and improved error handling.
 @app.route("/api/tickers")
 def get_tickers():
-    query = request.args.get("query", "").lower()
+    # Retrieve and validate the search query
+    query = request.args.get("query", "").strip().lower()
+    if not query:
+        return jsonify({"error": "Query parameter is required"}), 400
+
+    # Determine asset type and pagination parameters
     asset_type = request.args.get("asset_type", "STOCK").upper()
-    session = Session()
+    try:
+        limit = int(request.args.get("limit", 10))
+        page = int(request.args.get("page", 1))
+        # Prevent abuse by capping the maximum results per page
+        limit = min(limit, MAX_TICKERS_PER_REQUEST)
+        offset = (page - 1) * limit
+    except ValueError:
+        return jsonify({"error": "Invalid pagination parameters"}), 400
 
-    # Prepare patterns for matching.
-    starts_pattern = f"{query}%"
-    contains_pattern = f"%{query}%"
+    # Determine if fuzzy ranking is enabled (default is False)
+    fuzzy_enabled = request.args.get("fuzzy", "false").lower() == "true"
 
-    # Select the model based on asset type.
-    if asset_type == "CRYPTO":
-        model = CryptoQuote
-    else:
-        model = StockQuote
+    try:
+        session = Session()
+        # Build the base query based on asset type
+        if asset_type == "CRYPTO":
+            base_query = session.query(CryptoQuote).filter(
+                (CryptoQuote.ticker.ilike(f"%{query}%")) |
+                (CryptoQuote.name.ilike(f"%{query}%")) |
+                (CryptoQuote.symbol.ilike(f"%{query}%"))
+            )
+        else:
+            base_query = session.query(StockQuote).filter(
+                (StockQuote.ticker.ilike(f"%{query}%")) |
+                (StockQuote.name.ilike(f"%{query}%")) |
+                (StockQuote.symbol.ilike(f"%{query}%"))
+            )
 
-    # The filtering condition: match anywhere in the fields.
-    filter_condition = (
-        model.symbol.ilike(contains_pattern) |
-        model.ticker.ilike(contains_pattern) |
-        model.name.ilike(contains_pattern)
-    )
+        if fuzzy_enabled:
+            # Retrieve extra candidates to score them intelligently
+            candidate_results = base_query.limit(50).all()
+            scored_results = []
+            for record in candidate_results:
+                score = max(
+                    fuzz.token_set_ratio(query, record.ticker.lower()),
+                    fuzz.token_set_ratio(query, record.name.lower()),
+                    fuzz.token_set_ratio(query, record.symbol.lower())
+                )
+                scored_results.append((score, record))
+            scored_results.sort(key=lambda x: x[0], reverse=True)
+            # Apply manual pagination on the sorted candidates
+            final_results = [record for _, record in scored_results[offset: offset + limit]]
+        else:
+            # Without fuzzy matching, let the database handle pagination
+            final_results = base_query.offset(offset).limit(limit).all()
 
-    # Build a CASE expression to assign priority:
-    # Lower numbers mean higher priority.
-    priority = case(
-        [
-            (model.symbol.ilike(starts_pattern), 0),
-            (model.ticker.ilike(starts_pattern), 1),
-            (model.name.ilike(starts_pattern), 2),
-            (model.symbol.ilike(contains_pattern), 3),
-            (model.ticker.ilike(contains_pattern), 4),
-            (model.name.ilike(contains_pattern), 5)
-        ],
-        else_=6
-    )
+        session.close()
+        # Prepare the JSON response
+        response = [
+            {"ticker": r.ticker, "name": r.name, "symbol": r.symbol}
+            for r in final_results
+        ]
+        return jsonify(response)
 
-    # Execute the query ordering first by our computed priority and then by symbol as a secondary sort.
-    tickers = session.query(model).filter(filter_condition).order_by(priority, model.symbol).limit(10).all()
-    session.close()
-
-    # Return the results as JSON.
-    return jsonify([{"ticker": t.ticker, "name": t.name, "symbol": t.symbol} for t in tickers])
+    except SQLAlchemyError as e:
+        current_app.logger.error(f"Database error in get_tickers: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+    except Exception as e:
+        current_app.logger.error(f"Unexpected error in get_tickers: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route("/api/sync/full", methods=["POST"])
 def sync_full():

@@ -725,7 +725,7 @@
         }
       });
 
-    // Fuzzy search implementation
+    // Fuzzy search implementation with updated fuzzy parameter
     function setupAutocomplete(inputId, suggestionsId, assetTypeSelectorId) {
       const input = document.getElementById(inputId);
       const suggestions = document.getElementById(suggestionsId);
@@ -738,7 +738,8 @@
           suggestions.style.display = 'none';
           return;
         }
-        fetch(`/api/tickers?query=${encodeURIComponent(query)}&asset_type=${assetType}`)
+        // Include the fuzzy parameter in the API call
+        fetch(`/api/tickers?query=${encodeURIComponent(query)}&asset_type=${assetType}&fuzzy=true`)
           .then(response => response.json())
           .then(data => {
             suggestions.innerHTML = '';
