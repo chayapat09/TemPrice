@@ -937,9 +937,9 @@ if __name__ == "__main__":
         Base.metadata.create_all(engine)
     if stock_quotes_count == 0:
         logger.info("Stock database is empty. Running full sync for stocks...")
-        full_sync_stocks()
+        # full_sync_stocks()
     if crypto_quotes_count == 0:
         logger.info("Crypto database is empty. Running full sync for cryptocurrencies...")
-        full_sync_crypto()
+        # full_sync_crypto()
     logger.info(f"Starting Flask API on {FLASK_HOST}:{FLASK_PORT}...")
     app.run(host=FLASK_HOST, port=FLASK_PORT)

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>StockData Management Dashboard</title>
+  <title>Market Data Management Dashboard</title>
   <style>
     /* ----------------------
        Global Variables & Base Styles
@@ -68,9 +68,7 @@
       gap: 1.5rem;
     }
     .stats-grid {
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 15px;
-      margin-bottom: 20px;
+      grid-template-columns: repeat(4, 1fr);
     }
     .stats-card {
       padding: 1.5rem;
@@ -226,7 +224,7 @@
       gap: 10px;
       align-items: center;
     }
-    select, button {
+    select, button, input {
       padding: 8px 12px;
       border-radius: 4px;
       border: 1px solid #d1d5db;
@@ -234,7 +232,7 @@
       font-size: 14px;
       cursor: pointer;
     }
-    select:focus, button:focus {
+    select:focus, button:focus, input:focus {
       outline: none;
       border-color: #2563eb;
       box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
@@ -276,6 +274,12 @@
     .chart-container {
       position: relative;
       height: 400px;
+      margin-bottom: 20px;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
       margin-bottom: 20px;
     }
     .stat-card {
@@ -361,7 +365,7 @@
     <div class="container">
       <div class="header-content">
         <div>
-          <h1>StockData Management Dashboard</h1>
+          <h1>Market Data Management Dashboard</h1>
         </div>
         <div class="refresh-section">
           <span class="success-dot"></span>
@@ -463,7 +467,11 @@
           <div class="card-header">
             <h2>Force Sync for Ticker</h2>
           </div>
-          <div style="margin-bottom: 1rem;">
+          <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+            <select id="sync-asset-type-select">
+              <option value="STOCK">Stock</option>
+              <option value="CRYPTO">Crypto</option>
+            </select>
             <input type="text" id="sync-ticker-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px;">
             <button class="button button-primary" id="force-full-sync-btn">Force Full Sync</button>
             <button class="button button-outline" id="force-delta-sync-btn">Force Delta Sync</button>
@@ -492,20 +500,20 @@
           </div>
         </div>
 
-        <!-- Unified Ticker Data Preview (Updated Section) -->
+        <!-- Unified Ticker Data Preview (Real Data from API) -->
         <div class="card" id="unified-ticker-preview">
           <div class="card-header">
             <h2>Unified Ticker Data Preview</h2>
           </div>
           <div style="padding: 1rem;">
-            <!-- Ticker Search with Asset Type Selector -->
+            <!-- Ticker Search -->
             <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
-              <select id="asset-type-select" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border);">
-                <option value="STOCK" selected>Stock</option>
+              <select id="asset-type-select">
+                <option value="STOCK">Stock</option>
                 <option value="CRYPTO">Crypto</option>
               </select>
               <input type="text" id="ticker-search-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px;">
-              <button class="button button-primary" id="ticker-search-btn" style="margin-left: 0.5rem;">Search</button>
+              <button class="button button-primary" id="ticker-search-btn">Search</button>
             </div>
             <!-- Ticker Meta Data Preview -->
             <div id="ticker-meta-preview" style="margin-bottom: 1rem; border: 1px solid #e2e8f0; padding: 1rem; border-radius: 0.25rem;">
@@ -514,7 +522,7 @@
             </div>
             <!-- Chart Header with Data Type Selector -->
             <div class="chart-header">
-              <h1 class="chart-title" id="chart-title">Price Chart</h1>
+              <h1 class="chart-title">Asset Price Chart</h1>
               <div class="controls">
                 <label for="dataType">Data Type:</label>
                 <select id="dataType">
@@ -725,7 +733,7 @@
     fetch('/api/stats')
       .then(response => response.json())
       .then(data => {
-        document.getElementById('total-tickers').textContent = data.total_stock_tickers + data.total_crypto_tickers;
+        document.getElementById('total-tickers').textContent = data.total_tickers;
         document.getElementById('db-size').textContent = data.db_size;
         document.getElementById('cache-hit-rate').textContent = data.cache_hit_rate;
         document.getElementById('api-requests-24h').textContent = data.api_requests_24h;
@@ -775,10 +783,11 @@
     // Force Sync for Ticker
     document.getElementById('force-full-sync-btn').addEventListener('click', () => {
       const ticker = document.getElementById('sync-ticker-input').value;
+      const assetType = document.getElementById('sync-asset-type-select').value;
       fetch('/api/sync/full', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ticker: ticker})
+        body: JSON.stringify({ticker: ticker, asset_type: assetType})
       })
       .then(response => response.json())
       .then(data => {
@@ -788,10 +797,11 @@
     });
     document.getElementById('force-delta-sync-btn').addEventListener('click', () => {
       const ticker = document.getElementById('sync-ticker-input').value;
+      const assetType = document.getElementById('sync-asset-type-select').value;
       fetch('/api/sync/delta', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ticker: ticker})
+        body: JSON.stringify({ticker: ticker, asset_type: assetType})
       })
       .then(response => response.json())
       .then(data => {
@@ -849,7 +859,7 @@
     setInterval(fetchTickerTraffic, 60000);
 
     // ----------------------
-    // Unified Ticker Data Preview Logic & Visualization (Updated)
+    // Unified Ticker Data Preview Logic & Visualization
     // ----------------------
     let stockChart;
     let fullData = [];
@@ -857,53 +867,29 @@
     let currentPage = 1;
     const rowsPerPage = 10;
 
-    function fetchHistoricalData(ticker, assetType) {
+    // Fetch historical data via API (and full ticker meta data)
+    function fetchHistoricalData(ticker) {
+      const assetType = document.getElementById('asset-type-select').value;
       fetch(`/api/unified?ticker=${ticker}&asset_type=${assetType}`)
-        .then(response => {
-          if (!response.ok) {
-            throw new Error('Ticker not found or error fetching data');
-          }
-          return response.json();
-        })
+        .then(response => response.json())
         .then(data => {
-          // Update meta data based on asset type
+          // Update the meta data section
           const metaData = data.quote_data;
           const cacheData = data.latest_cache;
-          const assetType = data.asset_type;
-          let metaHtml = `
-            <p><strong>Ticker:</strong> ${metaData.ticker}</p>
-            <p><strong>Name:</strong> ${metaData.name}</p>
-            <p><strong>Symbol:</strong> ${metaData.symbol}</p>
-          `;
-          if (assetType === 'STOCK') {
-            metaHtml += `
-              <p><strong>Language:</strong> ${metaData.language}</p>
-              <p><strong>Region:</strong> ${metaData.region}</p>
-              <p><strong>Quote Type:</strong> ${metaData.quote_type}</p>
-              <p><strong>Exchange:</strong> ${metaData.exchange}</p>
-              <p><strong>Full Exchange Name:</strong> ${metaData.full_exchange_name}</p>
-              <p><strong>First Trade Date:</strong> ${metaData.first_trade_date}</p>
-            `;
-          } else if (assetType === 'CRYPTO') {
-            metaHtml += `
-              <p><strong>Image:</strong> <img src="${metaData.image}" alt="${metaData.name}" style="width: 50px; height: 50px;"></p>
-              <p><strong>ATH:</strong> ${metaData.ath}</p>
-              <p><strong>ATH Date:</strong> ${metaData.ath_date}</p>
-              <p><strong>ATL:</strong> ${metaData.atl}</p>
-              <p><strong>ATL Date:</strong> ${metaData.atl_date}</p>
-              <p><strong>Total Supply:</strong> ${metaData.total_supply}</p>
-              <p><strong>Max Supply:</strong> ${metaData.max_supply}</p>
-            `;
+          let metaHtml = `<p><strong>Ticker:</strong> ${metaData.ticker}</p>
+                          <p><strong>Name:</strong> ${metaData.name}</p>`;
+          if(assetType === "STOCK") {
+            metaHtml += `<p><strong>Exchange:</strong> ${metaData.exchange || 'N/A'}</p>
+                         <p><strong>Region:</strong> ${metaData.region || 'N/A'}</p>`;
+          } else {
+            metaHtml += `<p><strong>ATH:</strong> ${metaData.ath || 'N/A'}</p>
+                         <p><strong>ATL:</strong> ${metaData.atl || 'N/A'}</p>
+                         <p><strong>Total Supply:</strong> ${metaData.total_supply || 'N/A'}</p>`;
           }
-          metaHtml += `
-            <p><strong>Latest Price (Cache):</strong> ${cacheData.price} <small>at ${cacheData.timestamp}</small></p>
-          `;
+          metaHtml += `<p><strong>Latest Price (Cache):</strong> ${cacheData.price} <small>at ${cacheData.timestamp}</small></p>`;
           document.getElementById('meta-data-content').innerHTML = metaHtml;
 
-          // Update chart title
-          document.getElementById('chart-title').textContent = `${metaData.name} (${metaData.symbol}) Price Chart`;
-
-          // Process historical data
+          // Process historical data as before
           fullData = data.historical_data;
           fullData = fullData.map((item, index, arr) => {
             if (index > 0) {
@@ -922,12 +908,6 @@
         })
         .catch(err => {
           console.error('Error fetching historical data:', err);
-          document.getElementById('meta-data-content').innerHTML = `<p style="color: red;">${err.message}</p>`;
-          if (stockChart) {
-            stockChart.destroy();
-          }
-          document.getElementById('dataTableBody').innerHTML = '';
-          document.getElementById('pagination').innerHTML = '';
         });
     }
 
@@ -1113,17 +1093,17 @@
 
     // Initialize ticker preview on page load
     document.addEventListener('DOMContentLoaded', function() {
-      const defaultTicker = 'AAPL';
-      const defaultAssetType = 'STOCK';
-      fetchHistoricalData(defaultTicker, defaultAssetType);
+      const assetTypeSelect = document.getElementById('asset-type-select');
+      // Set default ticker based on asset type selection
+      const defaultTicker = assetTypeSelect.value === "CRYPTO" ? 'bitcoin' : 'AAPL';
+      fetchHistoricalData(defaultTicker);
 
       // Ticker search functionality
       document.getElementById('ticker-search-btn').addEventListener('click', () => {
         const ticker = document.getElementById('ticker-search-input').value.trim();
-        const assetType = document.getElementById('asset-type-select').value;
         if (ticker) {
           currentPage = 1;
-          fetchHistoricalData(ticker, assetType);
+          fetchHistoricalData(ticker);
         }
       });
 
