@@ -1,38 +1,38 @@
 # Stock and Crypto Data API Documentation
 
-## Introduction
-This API provides access to stock and cryptocurrency data, including unified ticker information, latest prices, historical data, data quality metrics, and more. It also allows triggering full and delta syncs for data updates. The API is built using Flask and serves data from a SQLite database, with caching mechanisms to optimize performance.
+## Overview
+This API provides access to both stock and cryptocurrency data, allowing clients to fetch unified ticker information, query historical prices, check data quality, monitor ticker traffic, and perform data synchronization. The API supports both GET and POST requests and offers detailed endpoints for various functionalities.
 
 ## Base URL
-All API endpoints use the following base URL:
+All API endpoints use the following base URL (adjust to your server configuration):
 ```
-/api
+http://<server_address>:8082
 ```
 
 ## General Information
-- All API endpoints return data in **JSON** format.
-- Dates and timestamps follow the **ISO 8601** format (e.g., `2023-10-01T12:00:00`).
-- The API **does not** require authentication.
-- Be mindful of **rate limits**, especially for endpoints that trigger syncs or fetch real-time data.
+- All endpoints return data in **JSON** format.
+- Dates and timestamps follow the **ISO 8601** standard (e.g., `2023-10-01T12:00:00`).
+- The API does not require authentication.
+- Be mindful of rate limits, especially for endpoints that trigger data synchronization or fetch real-time data.
 
 ---
 
 ## Endpoints
 
 ### 1. Get Unified Ticker Data
-- **URL:** `/unified`
+- **URL:** `/api/unified`
 - **Method:** `GET`
 - **Query Parameters:**
-  - `ticker` *(required, string)*: The ticker symbol of the asset (e.g., `AAPL` or `bitcoin`).
-  - `asset_type` *(optional, string, default: "STOCK")*: Either `"STOCK"` or `"CRYPTO"`.
+  - `ticker` (required, string): The ticker symbol (e.g., `AAPL` or `bitcoin`).
+  - `asset_type` (optional, string, default: "STOCK"): Either "STOCK" or "CRYPTO".
 
-**Description:**  
-Retrieves unified data for the specified ticker, including static quote data, the latest price from cache, and historical price data.
+**Description:**
+Retrieves unified data for the specified ticker, including static quote data, the latest cached price, and historical price data.
 
 **Responses:**
 - `200 OK`: JSON object containing `ticker`, `asset_type`, `quote_data`, `latest_cache`, and `historical_data`.
-- `400 Bad Request`: If `ticker` is not provided.
-- `404 Not Found`: If the `ticker` is not found in the database.
+- `400 Bad Request`: Missing `ticker` parameter.
+- `404 Not Found`: Ticker not found in the database.
 
 **Example Response:**
 ```json
@@ -71,12 +71,11 @@ Retrieves unified data for the specified ticker, including static quote data, th
 ---
 
 ### 2. Get Data Quality Metrics
-- **URL:** `/data_quality`
+- **URL:** `/api/data_quality`
 - **Method:** `GET`
-- **Query Parameters:** None
 
-**Description:**  
-Provides data quality metrics, including the total number of stock and crypto tickers, missing fields in stock quotes, and duplicate price entries.
+**Description:**
+Provides data quality metrics such as the total number of stock and crypto tickers, count of missing fields, and duplicate entries.
 
 **Example Response:**
 ```json
@@ -91,30 +90,28 @@ Provides data quality metrics, including the total number of stock and crypto ti
 ---
 
 ### 3. Get Ticker Traffic
-- **URL:** `/ticker_traffic`
+- **URL:** `/api/ticker_traffic`
 - **Method:** `GET`
-- **Query Parameters:** None
 
-**Description:**  
-Returns the query counts for each ticker and asset type, reflecting API usage frequency.
+**Description:**
+Returns query counts for each ticker and asset type, reflecting API usage frequency.
 
 **Example Response:**
 ```json
 [
-  {"ticker": "AAPL", "asset_type": "STOCK", "count": 100},
-  {"ticker": "bitcoin", "asset_type": "CRYPTO", "count": 50}
+  { "ticker": "AAPL", "asset_type": "STOCK", "count": 100 },
+  { "ticker": "bitcoin", "asset_type": "CRYPTO", "count": 50 }
 ]
 ```
 
 ---
 
 ### 4. Get Cache Information
-- **URL:** `/cache_info`
+- **URL:** `/api/cache_info`
 - **Method:** `GET`
-- **Query Parameters:** None
 
-**Description:**  
-Provides information about the cache, including the last refresh time and the time until the next scheduled refresh.
+**Description:**
+Provides details about the cache including the last refresh time and the time until the next scheduled refresh.
 
 **Example Response:**
 ```json
@@ -127,13 +124,13 @@ Provides information about the cache, including the last refresh time and the ti
 ---
 
 ### 5. Get Latest Price
-- **URL:** `/latest`
+- **URL:** `/api/latest`
 - **Method:** `GET`
 - **Query Parameters:**
-  - `ticker` *(required, string)*
-  - `asset_type` *(optional, string, default: "STOCK")*
+  - `ticker` (required, string)
+  - `asset_type` (optional, string, default: "STOCK")
 
-**Description:**  
+**Description:**
 Retrieves the latest price for the specified ticker from the cache or fetches it if necessary.
 
 **Example Response:**
@@ -149,13 +146,13 @@ Retrieves the latest price for the specified ticker from the cache or fetches it
 ---
 
 ### 6. Get Assets
-- **URL:** `/assets`
+- **URL:** `/api/assets`
 - **Method:** `GET`
-- **Query Parameters:**  
-  - `asset_type` *(optional, string, default: "STOCK")*
+- **Query Parameters:**
+  - `asset_type` (optional, string, default: "STOCK")
 
-**Description:**  
-Lists all assets of the specified type with their latest prices from the cache.
+**Description:**
+Lists all available assets of the specified type with their latest prices and details.
 
 **Example Response:**
 ```json
@@ -174,11 +171,14 @@ Lists all assets of the specified type with their latest prices from the cache.
 ---
 
 ### 7. Get Historical Data
-- **URL:** `/historical`
+- **URL:** `/api/historical`
 - **Method:** `GET`
-- **Query Parameters:**  
-  - `ticker` *(required, string)*
-  - `asset_type` *(optional, string, default: "STOCK")*
+- **Query Parameters:**
+  - `ticker` (required, string)
+  - `asset_type` (optional, string, default: "STOCK")
+
+**Description:**
+Retrieves historical price data for the specified ticker.
 
 **Example Response:**
 ```json
@@ -201,9 +201,11 @@ Lists all assets of the specified type with their latest prices from the cache.
 ---
 
 ### 8. Get Statistics
-- **URL:** `/stats`
+- **URL:** `/api/stats`
 - **Method:** `GET`
-- **Query Parameters:** None
+
+**Description:**
+Provides overall API statistics including total tickers, database size, cache hit rate, API request counts, and more.
 
 **Example Response:**
 ```json
@@ -220,8 +222,8 @@ Lists all assets of the specified type with their latest prices from the cache.
     "asset_prices_crypto": 50000
   },
   "region_distribution": {
-    "US": {"count": 4000, "percentage": 80.0},
-    "TH": {"count": 1000, "percentage": 20.0}
+    "US": { "count": 4000, "percentage": 80.0 },
+    "TH": { "count": 1000, "percentage": 20.0 }
   }
 }
 ```
@@ -229,15 +231,18 @@ Lists all assets of the specified type with their latest prices from the cache.
 ---
 
 ### 9. Trigger Full Sync
-- **URL:** `/sync/full`
+- **URL:** `/api/sync/full`
 - **Method:** `POST`
-- **Request Body:**  
-  ```json
-  {
-    "ticker": "AAPL",
-    "asset_type": "STOCK"
-  }
-  ```
+- **Request Body:**
+```json
+{
+  "ticker": "AAPL",
+  "asset_type": "STOCK"
+}
+```
+
+**Description:**
+Initiates a full data synchronization. If a specific ticker is provided, only that ticker is synced; otherwise, a global sync is performed.
 
 **Example Response:**
 ```json
@@ -249,15 +254,18 @@ Lists all assets of the specified type with their latest prices from the cache.
 ---
 
 ### 10. Trigger Delta Sync
-- **URL:** `/sync/delta`
+- **URL:** `/api/sync/delta`
 - **Method:** `POST`
-- **Request Body:**  
-  ```json
-  {
-    "ticker": "bitcoin",
-    "asset_type": "CRYPTO"
-  }
-  ```
+- **Request Body:**
+```json
+{
+  "ticker": "bitcoin",
+  "asset_type": "CRYPTO"
+}
+```
+
+**Description:**
+Performs an incremental data synchronization for the specified ticker. If no ticker is specified, a global delta sync is executed.
 
 **Example Response:**
 ```json
@@ -268,12 +276,18 @@ Lists all assets of the specified type with their latest prices from the cache.
 
 ---
 
-## Notes
-- Cache refresh:  
-  - **Every 1 minute** for top tickers  
-  - **15-minute TTL** for regular entries  
-  - **24-hour TTL** for "not found" entries  
+## Additional Notes
+- **Caching:**
+  - Top tickers are refreshed every 1 minute.
+  - Regular entries use a 15-minute TTL.
+  - Entries not found are cached for 24 hours.
+- **Error Handling:**
+  - Endpoints return appropriate HTTP status codes (e.g., 400, 404, 500) along with error messages.
+- **Data Sources:**
+  - Stock data is fetched from Yahoo Finance.
+  - Cryptocurrency data is obtained from CoinGecko and Binance.
+- **Synchronization:**
+  - Full and delta sync endpoints update the database with the latest data from external APIs.
 
----
-
-This API provides efficient stock and crypto market data retrieval with robust caching and sync capabilities.
+## Contact & Support
+For issues or further information, please contact the API support team.

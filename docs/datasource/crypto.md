@@ -583,3 +583,10 @@ Example Usage:
 To get the current price for all symbols, simply call the endpoint without any symbol parameter.
 To get the price for a particular pair (e.g. BTCUSDT), include symbol=BTCUSDT in the query string.
 These endpoints provide the core market data functionalities from the Binance Public Spot API. They are used for listing available symbols, obtaining historical OHLC data for charting, and fetching up-to-date price information either for a single symbol or across the entire market.
+
+
+API NEEDED
+
+1. List All Symbol in Provider (Market)
+2. OHLC(V) API for Ticker (Symbol)
+3. Latest(Realtime) Price Data (For All Symbol / Specific symbol) 
