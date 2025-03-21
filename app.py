@@ -845,38 +845,51 @@ def get_stats():
 
 from sqlalchemy import case
 
+from sqlalchemy import case
+from flask import jsonify, request
+
 @app.route("/api/tickers")
 def get_tickers():
     query = request.args.get("query", "").lower()
     asset_type = request.args.get("asset_type", "STOCK").upper()
     session = Session()
 
-    if asset_type == "CRYPTO":
-        symbol_match = CryptoQuote.symbol.ilike(f"%{query}%")
-        ticker_match = CryptoQuote.ticker.ilike(f"%{query}%")
-        name_match = CryptoQuote.name.ilike(f"%{query}%")
-        tickers = session.query(CryptoQuote).filter(
-            symbol_match | ticker_match | name_match
-        ).order_by(
-            case(
-                [(symbol_match, 0), (ticker_match, 1), (name_match, 2)],
-                else_=3
-            )
-        ).limit(10).all()
-    else:
-        symbol_match = StockQuote.symbol.ilike(f"%{query}%")
-        ticker_match = StockQuote.ticker.ilike(f"%{query}%")
-        name_match = StockQuote.name.ilike(f"%{query}%")
-        tickers = session.query(StockQuote).filter(
-            symbol_match | ticker_match | name_match
-        ).order_by(
-            case(
-                [(symbol_match, 0), (ticker_match, 1), (name_match, 2)],
-                else_=3
-            )
-        ).limit(10).all()
+    # Prepare patterns for matching.
+    starts_pattern = f"{query}%"
+    contains_pattern = f"%{query}%"
 
+    # Select the model based on asset type.
+    if asset_type == "CRYPTO":
+        model = CryptoQuote
+    else:
+        model = StockQuote
+
+    # The filtering condition: match anywhere in the fields.
+    filter_condition = (
+        model.symbol.ilike(contains_pattern) |
+        model.ticker.ilike(contains_pattern) |
+        model.name.ilike(contains_pattern)
+    )
+
+    # Build a CASE expression to assign priority:
+    # Lower numbers mean higher priority.
+    priority = case(
+        [
+            (model.symbol.ilike(starts_pattern), 0),
+            (model.ticker.ilike(starts_pattern), 1),
+            (model.name.ilike(starts_pattern), 2),
+            (model.symbol.ilike(contains_pattern), 3),
+            (model.ticker.ilike(contains_pattern), 4),
+            (model.name.ilike(contains_pattern), 5)
+        ],
+        else_=6
+    )
+
+    # Execute the query ordering first by our computed priority and then by symbol as a secondary sort.
+    tickers = session.query(model).filter(filter_condition).order_by(priority, model.symbol).limit(10).all()
     session.close()
+
+    # Return the results as JSON.
     return jsonify([{"ticker": t.ticker, "name": t.name, "symbol": t.symbol} for t in tickers])
 
 @app.route("/api/sync/full", methods=["POST"])
