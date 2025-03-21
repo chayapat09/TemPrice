@@ -1032,4 +1032,8 @@ if __name__ == "__main__":
     #     # full_sync_stocks()
     # if crypto_quotes_count == 0:
     #     # full_sync_crypto()
+
+    # Pre-populate cache before starting to serve user requests
+    refresh_all_latest_prices()
+
     app.run(host=FLASK_HOST, port=FLASK_PORT)
