@@ -2,26 +2,18 @@ import datetime
 import time
 import logging
 import os
+import io
+import pandas as pd
+import requests
 from collections import Counter
+from decimal import Decimal
 from flask import Flask, jsonify, request, render_template, current_app
 from sqlalchemy import BigInteger, Column, Date, DateTime, DECIMAL, Integer, String, create_engine, func, text, case
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from apscheduler.schedulers.background import BackgroundScheduler
-import pandas as pd
-import yfinance as yf
-import requests
-from decimal import Decimal
 from rapidfuzz import fuzz  # for fuzzy matching
 from sqlalchemy.exc import SQLAlchemyError
-
-# Ensure the 'instance' directory exists
-if not os.path.exists('instance'):
-    os.makedirs('instance')
-
-# Logging Configuration
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 # Configurable Parameters
 MAX_TICKERS_PER_REQUEST = 50
@@ -37,7 +29,22 @@ NOT_FOUND_TTL = 1440
 QUERY_COUNTER_SAVE_INTERVAL_MINUTES = 5
 DELTA_SYNC_INTERVAL_DAYS = 1
 
-# Global variable to track last cache refresh
+# New configuration for currency data (AlphaVantage)
+ALPHAVANTAGE_API_KEY = "demo"  # Replace with your own API key
+CURRENCY_LIST_URL = "https://www.alphavantage.co/physical_currency_list/"
+
+# Ensure the 'instance' directory exists
+if not os.path.exists('instance'):
+    os.makedirs('instance')
+
+# Logging Configuration
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Global Cache, Query Counter, and Baseline for last saved counts
+latest_cache = {}
+query_counter = Counter()
+last_saved_counts = {}  # This dictionary holds the last saved count for each key
 last_cache_refresh = None
 
 # SQLAlchemy Setup and Models
@@ -68,6 +75,14 @@ class CryptoQuote(BaseQuote):
     atl_date = Column(DateTime)
     total_supply = Column(BigInteger)
     max_supply = Column(BigInteger)
+
+class CurrencyQuote(BaseQuote):
+    __tablename__ = "currency_quotes"
+    # New columns per the required structure
+    from_currency = Column(String(10), default="USD")           # always "USD"
+    from_currency_name = Column(String(100), default="United States Dollar")  # e.g. "United States Dollar"
+    to_currency = Column(String(10))                              # same as ticker
+    to_currency_name = Column(String(100))                        # from currency list or API metadata
 
 class AssetPrice(Base):
     __tablename__ = "asset_prices"
@@ -108,11 +123,6 @@ with engine.connect() as conn:
     except Exception:
         pass
 
-# Global Cache, Query Counter, and Baseline for last saved counts
-latest_cache = {}
-query_counter = Counter()
-last_saved_counts = {}  # This dictionary holds the last saved count for each key
-
 # Helper Functions
 def safe_convert(value, convert_func=lambda x: x):
     if value is None or pd.isna(value):
@@ -126,10 +136,238 @@ def chunk_list(lst, chunk_size):
     for i in range(0, len(lst), chunk_size):
         yield lst[i:i + chunk_size]
 
-# Stock Data Fetching & Database Update
+# ---------------------------
+# Currency Data Helpers
+# ---------------------------
+def download_currency_list():
+    """Download the currency list CSV from the provided URL and return a list of dicts."""
+    try:
+        response = requests.get(CURRENCY_LIST_URL)
+        if response.status_code == 200:
+            df = pd.read_csv(io.StringIO(response.text))
+            currencies = []
+            for _, row in df.iterrows():
+                code = str(row["currency code"]).strip()
+                name = str(row["currency name"]).strip()
+                currencies.append({
+                    "ticker": code,
+                    "symbol": code,
+                    "name": name,
+                    "from_currency": "USD",                      # fixed value
+                    "from_currency_name": "United States Dollar",  # fixed value
+                    "to_currency": code,                         # same as ticker
+                    "to_currency_name": name                     # from CSV data
+                })
+            return currencies
+        else:
+            logger.error("Failed to download currency list: " + response.text)
+            return []
+    except Exception as e:
+        logger.error("Exception in downloading currency list: " + str(e))
+        return []
+
+def fetch_alpha_realtime_currency_rate(to_currency, from_currency="USD"):
+    """Fetch realtime exchange rate using AlphaVantage's CURRENCY_EXCHANGE_RATE API."""
+    url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "CURRENCY_EXCHANGE_RATE",
+        "from_currency": from_currency,
+        "to_currency": to_currency,
+        "apikey": ALPHAVANTAGE_API_KEY
+    }
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            rate_info = data.get("Realtime Currency Exchange Rate", {})
+            if rate_info:
+                rate = rate_info.get("5. Exchange Rate")
+                if rate:
+                    return float(rate)
+        else:
+            logger.error(f"Error fetching realtime currency rate for {to_currency}: {response.text}")
+    except Exception as e:
+        logger.error(f"Exception fetching realtime currency rate for {to_currency}: {e}")
+    return "NOT_FOUND"
+
+def fetch_alpha_fx_daily(from_symbol, to_symbol, start_date, end_date, outputsize="compact"):
+    """Fetch historical FX daily data using AlphaVantage's FX_DAILY API and return a DataFrame."""
+    url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "FX_DAILY",
+        "from_symbol": from_symbol,
+        "to_symbol": to_symbol,
+        "apikey": ALPHAVANTAGE_API_KEY,
+        "outputsize": outputsize,
+        "datatype": "json"
+    }
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            time_series = data.get("Time Series FX (Daily)", {})
+            if not time_series:
+                return pd.DataFrame()
+            records = []
+            for date_str, day_data in time_series.items():
+                date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+                if start_date and date_obj < datetime.datetime.strptime(start_date, "%Y-%m-%d").date():
+                    continue
+                if end_date and date_obj > datetime.datetime.strptime(end_date, "%Y-%m-%d").date():
+                    continue
+                records.append({
+                    "date": date_obj,
+                    "open": float(day_data["1. open"]),
+                    "high": float(day_data["2. high"]),
+                    "low": float(day_data["3. low"]),
+                    "close": float(day_data["4. close"]),
+                    "volume": None  # FX data does not typically include volume.
+                })
+            if records:
+                df = pd.DataFrame(records)
+                df.sort_values("date", inplace=True)
+                df.set_index("date", inplace=True)
+                return df
+        else:
+            logger.error(f"Error fetching FX daily data for {to_symbol}: {response.text}")
+    except Exception as e:
+        logger.error(f"Exception fetching FX daily data for {to_symbol}: {e}")
+    return pd.DataFrame()
+
+def update_currency_database(currency_data, historical_data, upsert=False):
+    """Insert or update currency quotes and their historical FX data in the database."""
+    session = Session()
+    currency_quote_mappings = []
+    for item in currency_data:
+        mapping = {
+            "ticker": item["ticker"],
+            "asset_type": "CURRENCY",
+            "symbol": item["symbol"],
+            "name": item["name"],
+            "from_currency": item.get("from_currency", "USD"),
+            "from_currency_name": item.get("from_currency_name", "United States Dollar"),
+            "to_currency": item.get("to_currency"),
+            "to_currency_name": item.get("to_currency_name")
+        }
+        currency_quote_mappings.append(mapping)
+    if upsert:
+        for mapping in currency_quote_mappings:
+            session.merge(CurrencyQuote(**mapping))
+        session.commit()
+    else:
+        session.bulk_insert_mappings(CurrencyQuote, currency_quote_mappings)
+        session.commit()
+    currency_price_mappings = []
+    for ticker, df in historical_data.items():
+        if df is None or df.empty:
+            continue
+        for date, data_row in df.iterrows():
+            price_date = date if isinstance(date, datetime.date) else date.date()
+            mapping = {
+                "ticker": ticker,
+                "asset_type": "CURRENCY",
+                "price_date": price_date,
+                "open_price": safe_convert(data_row.get("open"), float),
+                "high_price": safe_convert(data_row.get("high"), float),
+                "low_price": safe_convert(data_row.get("low"), float),
+                "close_price": safe_convert(data_row.get("close"), float),
+                "volume": None
+            }
+            currency_price_mappings.append(mapping)
+    if upsert:
+        for mapping in currency_price_mappings:
+            session.merge(AssetPrice(**mapping))
+        session.commit()
+    else:
+        session.bulk_insert_mappings(AssetPrice, currency_price_mappings)
+        session.commit()
+    session.close()
+
+def full_sync_currency():
+    """Perform a full sync for all currency pairs (from USD to each currency in the list)."""
+    logger.info("Starting Full Sync for Currencies...")
+    currency_list = download_currency_list()
+    historical_data = {}
+    for currency in currency_list:
+        ticker = currency["ticker"]
+        if ticker.upper() == "USD":
+            continue  # Skip USD as USD/USD is always 1
+        df = fetch_alpha_fx_daily("USD", ticker, HISTORICAL_START_DATE, None, outputsize="full")
+        historical_data[ticker] = df
+        time.sleep(REQUEST_DELAY_SECONDS)
+    update_currency_database(currency_list, historical_data, upsert=False)
+    session = Session()
+    state = session.query(DeltaSyncState).filter_by(id=2).first()
+    if not state:
+        state = DeltaSyncState(id=2)
+    state.last_full_sync = datetime.datetime.now()
+    session.merge(state)
+    session.commit()
+    session.close()
+    logger.info("Full Sync for Currencies Completed.")
+
+def delta_sync_currency():
+    """Perform a delta sync (last 2 days) for all currencies."""
+    logger.info("Starting Delta Sync for Currencies...")
+    session = Session()
+    state = session.query(DeltaSyncState).filter_by(id=2).first()
+    session.close()
+    today = datetime.datetime.now().date()
+    two_days_ago = today - datetime.timedelta(days=2)
+    currency_list = download_currency_list()
+    historical_data = {}
+    for currency in currency_list:
+        ticker = currency["ticker"]
+        if ticker.upper() == "USD":
+            continue
+        df = fetch_alpha_fx_daily("USD", ticker, two_days_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"), outputsize="compact")
+        historical_data[ticker] = df
+        time.sleep(REQUEST_DELAY_SECONDS)
+    update_currency_database(currency_list, historical_data, upsert=True)
+    session = Session()
+    state = session.query(DeltaSyncState).filter_by(id=2).first()
+    if not state:
+        state = DeltaSyncState(id=2)
+    state.last_delta_sync = datetime.datetime.now()
+    session.merge(state)
+    session.commit()
+    session.close()
+    logger.info("Delta Sync for Currencies Completed.")
+
+class CurrencyDataSource:
+    BASE_URL = "https://www.alphavantage.co/query"
+
+    @staticmethod
+    def get_latest_price(ticker):
+        return fetch_alpha_realtime_currency_rate(ticker, from_currency="USD")
+
+    @staticmethod
+    def get_all_latest_prices():
+        currency_list = download_currency_list()
+        prices = {}
+        for currency in currency_list:
+            ticker = currency["ticker"]
+            if ticker.upper() == "USD":
+                prices[ticker] = 1.0
+            else:
+                price = fetch_alpha_realtime_currency_rate(ticker, from_currency="USD")
+                prices[ticker] = price
+            time.sleep(REQUEST_DELAY_SECONDS)
+        return prices
+
+def refresh_currency_prices():
+    prices = CurrencyDataSource.get_all_latest_prices()
+    now = datetime.datetime.now()
+    for ticker, price in prices.items():
+        latest_cache[("CURRENCY", ticker)] = (price, now)
+
+# ---------------------------
+# Stock & Crypto Functions (unchanged)
+# ---------------------------
 def fetch_yf_data_for_ticker(ticker, start_date=HISTORICAL_START_DATE, end_date=None):
     logger.info(f"Fetching data for stock ticker: {ticker}")
     try:
+        import yfinance as yf
         data = yf.Ticker(ticker)
         hist = data.history(start=start_date, end=end_date)
         if hist.empty:
@@ -153,6 +391,7 @@ def fetch_yf_data_for_ticker(ticker, start_date=HISTORICAL_START_DATE, end_date=
 
 def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL_START_DATE, end_date=None, sample_size=None):
     logger.info("Starting data fetch from yfinance for stocks...")
+    import yfinance as yf
     all_quotes = []
     offset = 0
     size = sample_size if sample_size is not None else 250
@@ -240,6 +479,7 @@ def update_stock_database(quotes_df, historical_data, upsert=False):
 
 def full_sync_stocks():
     logger.info("Starting Full Sync for Stocks...")
+    import yfinance as yf
     query_th = yf.EquityQuery("eq", ["region", "th"])
     quotes_df_th, historical_data_th = fetch_yf_data(MAX_TICKERS_PER_REQUEST, REQUEST_DELAY_SECONDS, query_th, start_date=HISTORICAL_START_DATE)
     query_us = yf.EquityQuery("is-in", ["exchange", "NMS", "NYQ"])
@@ -264,6 +504,7 @@ def delta_sync_stocks():
     session.close()
     today = datetime.datetime.now().date()
     two_days_ago = today - datetime.timedelta(days=2)
+    import yfinance as yf
     query_th = yf.EquityQuery("eq", ["region", "th"])
     quotes_df_th, historical_data_th = fetch_yf_data(MAX_TICKERS_PER_REQUEST, REQUEST_DELAY_SECONDS, query_th, start_date=two_days_ago.strftime("%Y-%m-%d"), end_date=today.strftime("%Y-%m-%d"))
     query_us = yf.EquityQuery("is-in", ["exchange", "NMS", "NYQ"])
@@ -280,97 +521,6 @@ def delta_sync_stocks():
     session.commit()
     session.close()
     logger.info("Delta Sync for Stocks Completed.")
-
-# Crypto Data Fetching & Database Update
-def fetch_coingecko_data():
-    logger.info("Fetching crypto metadata from CoinGecko...")
-    url = "https://api.coingecko.com/api/v3/coins/markets"
-    params = {
-        "vs_currency": "usd",
-        "order": "market_cap_desc",
-        "per_page": 250,
-        "page": 1,
-        "sparkline": "false"
-    }
-    headers = {"accept": "application/json"}
-    try:
-        response = requests.get(url, params=params, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            logger.info(f"Fetched metadata for {len(data)} cryptocurrencies.")
-            return data
-        else:
-            logger.error("Error fetching crypto metadata: " + response.text)
-            return []
-    except Exception as e:
-        logger.error("Exception fetching crypto metadata: " + str(e))
-        return []
-
-def fetch_coingecko_data_for_ticker(coin_id):
-    logger.info(f"Fetching data for crypto ticker: {coin_id}")
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            data = response.json()
-            return data
-        else:
-            logger.error(f"Error fetching crypto data for {coin_id}: {response.text}")
-            return None
-    except Exception as e:
-        logger.error(f"Exception fetching crypto data for {coin_id}: {e}")
-        return None
-
-def update_crypto_database(crypto_data, historical_data, upsert=False):
-    session = Session()
-    crypto_quote_mappings = []
-    for coin in crypto_data:
-        mapping = {
-            "ticker": coin.get("id"),
-            "asset_type": "CRYPTO",
-            "symbol": coin.get("symbol"),
-            "name": coin.get("name"),
-            "image": coin.get("image"),
-            "ath": safe_convert(coin.get("ath"), float),
-            "ath_date": pd.to_datetime(coin.get("ath_date")) if coin.get("ath_date") else None,
-            "atl": safe_convert(coin.get("atl"), float),
-            "atl_date": pd.to_datetime(coin.get("atl_date")) if coin.get("atl_date") else None,
-            "total_supply": safe_convert(coin.get("total_supply"), int),
-            "max_supply": safe_convert(coin.get("max_supply"), int)
-        }
-        crypto_quote_mappings.append(mapping)
-    if upsert:
-        for mapping in crypto_quote_mappings:
-            session.merge(CryptoQuote(**mapping))
-        session.commit()
-    else:
-        session.bulk_insert_mappings(CryptoQuote, crypto_quote_mappings)
-        session.commit()
-    crypto_price_mappings = []
-    for ticker, df in historical_data.items():
-        if df is None or df.empty:
-            continue
-        for date, data_row in df.iterrows():
-            price_date = date.date() if isinstance(date, datetime.datetime) else date
-            mapping = {
-                "ticker": ticker,
-                "asset_type": "CRYPTO",
-                "price_date": price_date,
-                "open_price": safe_convert(data_row.get("open"), float),
-                "high_price": safe_convert(data_row.get("high"), float),
-                "low_price": safe_convert(data_row.get("low"), float),
-                "close_price": safe_convert(data_row.get("close"), float),
-                "volume": safe_convert(data_row.get("volume"), Decimal)
-            }
-            crypto_price_mappings.append(mapping)
-    if upsert:
-        for mapping in crypto_price_mappings:
-            session.merge(AssetPrice(**mapping))
-        session.commit()
-    else:
-        session.bulk_insert_mappings(AssetPrice, crypto_price_mappings)
-        session.commit()
-    session.close()
 
 def full_sync_crypto():
     logger.info("Starting Full Sync for Cryptocurrencies...")
@@ -419,93 +569,14 @@ def delta_sync_crypto():
     session.close()
     logger.info("Delta Sync for Cryptocurrencies Completed.")
 
-# Binance API Helper
-BASE_BINANCE_URL = "https://api.binance.com"
-
-def safe_get(url, params=None, max_retries=5):
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, params=params, timeout=10)
-        except Exception as e:
-            logger.error(f"Request error: {e}")
-            time.sleep(1)
-            continue
-        if response.status_code == 200:
-            return response
-        elif response.status_code in (429, 418):
-            retry_after = int(response.headers.get("Retry-After", "1"))
-            logger.warning(f"Rate limit hit (HTTP {response.status_code}). Retrying after {retry_after} seconds...")
-            time.sleep(retry_after)
-        else:
-            logger.error(f"Error: HTTP {response.status_code} - {response.text}")
-            response.raise_for_status()
-    raise Exception("Max retries exceeded for URL: " + url)
-
-def fetch_binance_crypto_data(symbol, start_date, end_date):
-    logger.info(f"Fetching Binance historical data for {symbol}...")
-    try:
-        if start_date:
-            start_ts = int(datetime.datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
-        else:
-            start_ts = int(datetime.datetime.now().timestamp() * 1000) - (5 * 365 * 24 * 60 * 60 * 1000)
-        if end_date:
-            end_ts = int(datetime.datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
-        else:
-            end_ts = int(datetime.datetime.now().timestamp() * 1000)
-    except Exception as e:
-        logger.error(f"Error processing dates for symbol {symbol}: {e}")
-        return pd.DataFrame()
-
-    limit = 1000
-    klines = []
-    current_start = start_ts
-    url = BASE_BINANCE_URL + "/api/v3/klines"
-    
-    while current_start < end_ts:
-        try:
-            params = {
-                "symbol": symbol,
-                "interval": "1d",
-                "startTime": current_start,
-                "endTime": end_ts,
-                "limit": limit
-            }
-            response = safe_get(url, params=params)
-            data = response.json()
-        except Exception as e:
-            logger.error(f"Error fetching data for symbol {symbol} starting at {current_start}: {e}")
-            break
-        
-        if not data:
-            break
-        
-        klines.extend(data)
-        last_time = data[-1][0]
-        if last_time == current_start:
-            break
-        current_start = last_time + 1
-        time.sleep(0.1)
-    
-    if not klines:
-        return pd.DataFrame()
-    
-    try:
-        df = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume", "close_time",
-                                           "quote_asset_volume", "num_trades", "taker_buy_base", "taker_buy_quote", "ignore"])
-        df["open_time"] = pd.to_datetime(df["open_time"], unit='ms')
-        df.set_index("open_time", inplace=True)
-        df = df.astype({"open": "float", "high": "float", "low": "float", "close": "float", "volume": "float"})
-    except Exception as e:
-        logger.error(f"Error processing DataFrame for symbol {symbol}: {e}")
-        return pd.DataFrame()
-    
-    return df
-
+# ---------------------------
 # Data Source Classes
+# ---------------------------
 class StockDataSource:
     @staticmethod
     def get_latest_price(ticker):
         try:
+            import yfinance as yf
             data = yf.Ticker(ticker)
             return data.fast_info["last_price"]
         except KeyError:
@@ -518,6 +589,7 @@ class StockDataSource:
     def refresh_latest_prices(tickers):
         prices = {}
         tickers_str = " ".join(tickers)
+        import yfinance as yf
         data = yf.Tickers(tickers_str)
         for ticker in tickers:
             try:
@@ -554,9 +626,11 @@ class CryptoDataSource:
         prices = CryptoDataSource.get_all_latest_prices()
         return prices.get(ticker, "NOT_FOUND")
 
+# ---------------------------
+# Unified Latest Price and Cache Refresh
+# ---------------------------
 def get_latest_price(ticker, asset_type="STOCK"):
     key = (asset_type.upper(), ticker)
-    # Increment the counter on each /api/latest call
     query_counter[key] += 1
     now = datetime.datetime.now()
     if key in latest_cache:
@@ -567,8 +641,12 @@ def get_latest_price(ticker, asset_type="STOCK"):
             return value
     if asset_type.upper() == "STOCK":
         price = StockDataSource.get_latest_price(ticker)
-    else:
+    elif asset_type.upper() == "CRYPTO":
         price = CryptoDataSource.get_latest_price(ticker)
+    elif asset_type.upper() == "CURRENCY":
+        price = CurrencyDataSource.get_latest_price(ticker)
+    else:
+        price = None
     if price == "NOT_FOUND":
         latest_cache[key] = ("NOT_FOUND", now)
         return "NOT_FOUND"
@@ -609,7 +687,6 @@ def load_query_counter():
 
 def save_query_counter():
     session = Session()
-    # For each key in our in-memory counter, compute the delta since last save
     for (ticker, asset_type), current_count in query_counter.items():
         key = (ticker, asset_type)
         baseline = last_saved_counts.get(key, 0)
@@ -624,7 +701,9 @@ def save_query_counter():
     session.commit()
     session.close()
 
-# Flask Application
+# ---------------------------
+# Flask Application and Endpoints
+# ---------------------------
 app = Flask(__name__)
 api_stats = Counter()
 
@@ -637,6 +716,8 @@ def get_unified_ticker():
     session = Session()
     if asset_type == "CRYPTO":
         quote = session.query(CryptoQuote).filter_by(ticker=ticker, asset_type=asset_type).first()
+    elif asset_type == "CURRENCY":
+        quote = session.query(CurrencyQuote).filter_by(ticker=ticker, asset_type=asset_type).first()
     else:
         quote = session.query(StockQuote).filter_by(ticker=ticker, asset_type=asset_type).first()
     prices = session.query(AssetPrice).filter_by(ticker=ticker, asset_type=asset_type).all()
@@ -658,7 +739,7 @@ def get_unified_ticker():
             "full_exchange_name": quote.full_exchange_name,
             "first_trade_date": quote.first_trade_date.strftime("%Y-%m-%d") if quote.first_trade_date else None,
         })
-    else:
+    elif asset_type == "CRYPTO":
         quote_data.update({
             "image": quote.image,
             "ath": float(quote.ath) if quote.ath is not None else None,
@@ -668,6 +749,7 @@ def get_unified_ticker():
             "total_supply": quote.total_supply,
             "max_supply": quote.max_supply,
         })
+    # For CURRENCY we only have ticker, symbol and name (plus new currency fields)
     key = (asset_type, ticker)
     cache_entry = latest_cache.get(key, (None, None))
     latest_cache_data = {
@@ -698,6 +780,7 @@ def data_quality():
     session = Session()
     total_stock_tickers = session.query(StockQuote).count()
     total_crypto_tickers = session.query(CryptoQuote).count()
+    total_currency_tickers = session.query(CurrencyQuote).count()
     missing_long_name_stock = session.query(StockQuote).filter(StockQuote.name.is_(None)).count()
     missing_exchange_stock = session.query(StockQuote).filter(StockQuote.exchange.is_(None)).count()
     duplicate_entries = 0
@@ -710,12 +793,12 @@ def data_quality():
     data_quality_metrics = {
         "total_stock_tickers": total_stock_tickers,
         "total_crypto_tickers": total_crypto_tickers,
+        "total_currency_tickers": total_currency_tickers,
         "missing_fields": missing_long_name_stock + missing_exchange_stock,
         "duplicates": duplicate_entries
     }
     return jsonify(data_quality_metrics)
 
-# Updated ticker traffic endpoint with sorted ranking using most_common()
 @app.route("/api/ticker_traffic")
 def ticker_traffic():
     data = [{"ticker": t[1], "asset_type": t[0], "count": count} for t, count in query_counter.most_common()]
@@ -769,6 +852,8 @@ def get_assets():
     session = Session()
     if asset_type == "CRYPTO":
         quotes = session.query(CryptoQuote).all()
+    elif asset_type == "CURRENCY":
+        quotes = session.query(CurrencyQuote).all()
     else:
         quotes = session.query(StockQuote).all()
     session.close()
@@ -815,8 +900,10 @@ def get_stats():
     session = Session()
     total_stock_tickers = session.query(StockQuote).count()
     total_crypto_tickers = session.query(CryptoQuote).count()
+    total_currency_tickers = session.query(CurrencyQuote).count()
     stock_prices_count = session.query(AssetPrice).filter_by(asset_type="STOCK").count()
     crypto_prices_count = session.query(AssetPrice).filter_by(asset_type="CRYPTO").count()
+    currency_prices_count = session.query(AssetPrice).filter_by(asset_type="CURRENCY").count()
     delta_sync_state_count = session.query(DeltaSyncState).count()
     query_counts_count = session.query(QueryCount).count()
     region_counts = session.query(StockQuote.region, func.count(StockQuote.ticker)).group_by(StockQuote.region).all()
@@ -836,14 +923,17 @@ def get_stats():
     stats = {
         "total_stock_tickers": total_stock_tickers,
         "total_crypto_tickers": total_crypto_tickers,
+        "total_currency_tickers": total_currency_tickers,
         "db_size": db_size_str,
         "cache_hit_rate": "100%",
         "api_requests_24h": sum(api_stats.values()),
         "table_records": {
             "stock_quotes": total_stock_tickers,
             "crypto_quotes": total_crypto_tickers,
+            "currency_quotes": total_currency_tickers,
             "asset_prices_stock": stock_prices_count,
             "asset_prices_crypto": crypto_prices_count,
+            "asset_prices_currency": currency_prices_count,
             "delta_sync_state": delta_sync_state_count,
             "query_counts": query_counts_count
         },
@@ -855,36 +945,36 @@ def get_stats():
     }
     return jsonify(stats)
 
-# Enhanced /api/tickers endpoint with optional fuzzy matching, pagination, and improved error handling.
 @app.route("/api/tickers")
 def get_tickers():
-    # Retrieve and validate the search query
     query = request.args.get("query", "").strip().lower()
     if not query:
         return jsonify({"error": "Query parameter is required"}), 400
 
-    # Determine asset type and pagination parameters
     asset_type = request.args.get("asset_type", "STOCK").upper()
     try:
         limit = int(request.args.get("limit", 10))
         page = int(request.args.get("page", 1))
-        # Prevent abuse by capping the maximum results per page
         limit = min(limit, MAX_TICKERS_PER_REQUEST)
         offset = (page - 1) * limit
     except ValueError:
         return jsonify({"error": "Invalid pagination parameters"}), 400
 
-    # Determine if fuzzy ranking is enabled (default is False)
     fuzzy_enabled = request.args.get("fuzzy", "false").lower() == "true"
 
     try:
         session = Session()
-        # Build the base query based on asset type
         if asset_type == "CRYPTO":
             base_query = session.query(CryptoQuote).filter(
                 (CryptoQuote.ticker.ilike(f"%{query}%")) |
                 (CryptoQuote.name.ilike(f"%{query}%")) |
                 (CryptoQuote.symbol.ilike(f"%{query}%"))
+            )
+        elif asset_type == "CURRENCY":
+            base_query = session.query(CurrencyQuote).filter(
+                (CurrencyQuote.ticker.ilike(f"%{query}%")) |
+                (CurrencyQuote.name.ilike(f"%{query}%")) |
+                (CurrencyQuote.symbol.ilike(f"%{query}%"))
             )
         else:
             base_query = session.query(StockQuote).filter(
@@ -894,7 +984,6 @@ def get_tickers():
             )
 
         if fuzzy_enabled:
-            # Retrieve extra candidates to score them intelligently
             candidate_results = base_query.limit(50).all()
             scored_results = []
             for record in candidate_results:
@@ -905,14 +994,11 @@ def get_tickers():
                 )
                 scored_results.append((score, record))
             scored_results.sort(key=lambda x: x[0], reverse=True)
-            # Apply manual pagination on the sorted candidates
             final_results = [record for _, record in scored_results[offset: offset + limit]]
         else:
-            # Without fuzzy matching, let the database handle pagination
             final_results = base_query.offset(offset).limit(limit).all()
 
         session.close()
-        # Prepare the JSON response
         response = [
             {"ticker": r.ticker, "name": r.name, "symbol": r.symbol}
             for r in final_results
@@ -952,12 +1038,28 @@ def sync_full():
                         return jsonify({"error": f"Failed to fetch historical data for crypto ticker {ticker}"}), 404
                 else:
                     return jsonify({"error": f"Failed to fetch metadata for crypto ticker {ticker}"}), 404
+            elif asset_type == "CURRENCY":
+                currency_item = None
+                currency_list = download_currency_list()
+                for item in currency_list:
+                    if item["ticker"].lower() == ticker.lower():
+                        currency_item = item
+                        break
+                if currency_item:
+                    df = fetch_alpha_fx_daily("USD", currency_item["ticker"], HISTORICAL_START_DATE, None, outputsize="full")
+                    update_currency_database([currency_item], {currency_item["ticker"]: df}, upsert=True)
+                    return jsonify({"message": f"Full sync for currency ticker {ticker} completed."})
+                else:
+                    return jsonify({"error": f"Failed to fetch data for currency ticker {ticker}"}), 404
             else:
                 return jsonify({"error": "Invalid asset_type"}), 400
         else:
             if asset_type == "CRYPTO":
                 full_sync_crypto()
                 return jsonify({"message": "Global full sync for cryptocurrencies completed."})
+            elif asset_type == "CURRENCY":
+                full_sync_currency()
+                return jsonify({"message": "Global full sync for currencies completed."})
             else:
                 full_sync_stocks()
                 return jsonify({"message": "Global full sync for stocks completed."})
@@ -993,12 +1095,30 @@ def sync_delta():
                         return jsonify({"error": f"Failed to fetch delta historical data for crypto ticker {ticker}"}), 404
                 else:
                     return jsonify({"error": f"Failed to fetch metadata for crypto ticker {ticker}"}), 404
+            elif asset_type == "CURRENCY":
+                currency_item = None
+                currency_list = download_currency_list()
+                for item in currency_list:
+                    if item["ticker"].lower() == ticker.lower():
+                        currency_item = item
+                        break
+                if currency_item:
+                    today = datetime.datetime.now().date()
+                    two_days_ago = today - datetime.timedelta(days=2)
+                    df = fetch_alpha_fx_daily("USD", currency_item["ticker"], two_days_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"), outputsize="compact")
+                    update_currency_database([currency_item], {currency_item["ticker"]: df}, upsert=True)
+                    return jsonify({"message": f"Delta sync for currency ticker {ticker} completed."})
+                else:
+                    return jsonify({"error": f"Failed to fetch data for currency ticker {ticker}"}), 404
             else:
                 return jsonify({"error": "Invalid asset_type"}), 400
         else:
             if asset_type == "CRYPTO":
                 delta_sync_crypto()
                 return jsonify({"message": "Global delta sync for cryptocurrencies completed."})
+            elif asset_type == "CURRENCY":
+                delta_sync_currency()
+                return jsonify({"message": "Global delta sync for currencies completed."})
             else:
                 delta_sync_stocks()
                 return jsonify({"message": "Global delta sync for stocks completed."})
@@ -1010,12 +1130,16 @@ def sync_delta():
 def dashboard():
     return render_template('dashboard.html')
 
+# ---------------------------
 # Scheduler Setup
+# ---------------------------
 scheduler = BackgroundScheduler()
 scheduler.add_job(refresh_all_latest_prices, "interval", minutes=LATEST_CACHE_REFRESH_INTERVAL_MINUTES, id="cache_refresh")
 scheduler.add_job(delta_sync_stocks, "interval", days=DELTA_SYNC_INTERVAL_DAYS, id="delta_sync_stocks")
 scheduler.add_job(delta_sync_crypto, "interval", days=DELTA_SYNC_INTERVAL_DAYS, id="delta_sync_crypto")
+scheduler.add_job(delta_sync_currency, "interval", days=DELTA_SYNC_INTERVAL_DAYS, id="delta_sync_currency")
 scheduler.add_job(save_query_counter, "interval", minutes=QUERY_COUNTER_SAVE_INTERVAL_MINUTES, id="save_query_counter")
+scheduler.add_job(refresh_currency_prices, "interval", minutes=60, id="currency_cache_refresh")
 scheduler.start()
 
 load_query_counter()
@@ -1024,16 +1148,10 @@ if __name__ == "__main__":
     session = Session()
     stock_quotes_count = session.query(StockQuote).count()
     crypto_quotes_count = session.query(CryptoQuote).count()
+    currency_quotes_count = session.query(CurrencyQuote).count()
     session.close()
-    if stock_quotes_count == 0 or crypto_quotes_count == 0:
+    if stock_quotes_count == 0 or crypto_quotes_count == 0 or currency_quotes_count == 0:
         Base.metadata.drop_all(engine)
         Base.metadata.create_all(engine)
-    # if stock_quotes_count == 0:
-    #     # full_sync_stocks()
-    # if crypto_quotes_count == 0:
-    #     # full_sync_crypto()
-
-    # Pre-populate cache before starting to serve user requests
     refresh_all_latest_prices()
-
     app.run(host=FLASK_HOST, port=FLASK_PORT)

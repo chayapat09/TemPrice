@@ -13,3 +13,9 @@ Design Recommendation
 ```
 
 10. From what i know that running to fetch a big range of date data take a long time thus i want my service to always being up to date please design a price service such that a. it has historical data from 2020-1-1 b. it has latest daily update data as soon as possible but also considered c. it has api to fetch latest data query by symbol and asset type `STOCK` , `CRYPTO` , `CURRENCY`... but our service will pull from data source only once every 5 min to avoid rate limit. d. given asset type we provided api to list all asset and metadata
+
+
+
+
+
+11. Redesign database such that Asset It self (bitcoin, Tesla , THB ....) has different data entity from Quote (Which is price between two thing ex. Tesla / USD = TSLA Quote , BTC / USDT = BitcoinUSD Quote) so in future

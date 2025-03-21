@@ -453,6 +453,7 @@
             <select id="sync-asset-type" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border);">
               <option value="STOCK">Stock</option>
               <option value="CRYPTO">Crypto</option>
+              <option value="CURRENCY">Currency</option>
             </select>
             <input type="text" id="sync-ticker-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px; margin-left: 0.5rem;">
             <div id="sync-ticker-suggestions" class="autocomplete-suggestions" style="display: none;"></div>
@@ -489,6 +490,7 @@
               <select id="asset-type-select" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border);">
                 <option value="STOCK" selected>Stock</option>
                 <option value="CRYPTO">Crypto</option>
+                <option value="CURRENCY">Currency</option>
               </select>
               <input type="text" id="ticker-search-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px;">
               <div id="ticker-search-suggestions" class="autocomplete-suggestions" style="display: none;"></div>
@@ -657,6 +659,7 @@
     </div>
   </div>
 
+  <!-- Chart.js and Luxon for chart rendering -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/luxon/3.0.1/luxon.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-adapter-luxon/1.2.0/chartjs-adapter-luxon.min.js"></script>
@@ -889,7 +892,6 @@
         .then(data => {
           const metaData = data.quote_data;
           const cacheData = data.latest_cache;
-          const assetType = data.asset_type;
           let metaHtml = `
             <p><strong>Ticker:</strong> ${metaData.ticker}</p>
             <p><strong>Name:</strong> ${metaData.name}</p>
@@ -913,6 +915,11 @@
               <p><strong>ATL Date:</strong> ${metaData.atl_date}</p>
               <p><strong>Total Supply:</strong> ${metaData.total_supply}</p>
               <p><strong>Max Supply:</strong> ${metaData.max_supply}</p>
+            `;
+          } else if (assetType === 'CURRENCY') {
+            metaHtml += `
+              <p><strong>From Currency:</strong> ${metaData.from_currency || 'USD'} - ${metaData.from_currency_name || 'United States Dollar'}</p>
+              <p><strong>To Currency:</strong> ${metaData.to_currency} - ${metaData.to_currency_name}</p>
             `;
           }
           metaHtml += `<p><strong>Latest Price (Cache):</strong> ${cacheData.price} <small>at ${cacheData.timestamp}</small></p>`;
