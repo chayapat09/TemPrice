@@ -843,19 +843,39 @@ def get_stats():
     }
     return jsonify(stats)
 
+from sqlalchemy import case
+
 @app.route("/api/tickers")
 def get_tickers():
     query = request.args.get("query", "").lower()
     asset_type = request.args.get("asset_type", "STOCK").upper()
     session = Session()
+
     if asset_type == "CRYPTO":
+        symbol_match = CryptoQuote.symbol.ilike(f"%{query}%")
+        ticker_match = CryptoQuote.ticker.ilike(f"%{query}%")
+        name_match = CryptoQuote.name.ilike(f"%{query}%")
         tickers = session.query(CryptoQuote).filter(
-            (CryptoQuote.ticker.ilike(f"%{query}%")) | (CryptoQuote.name.ilike(f"%{query}%")) | (CryptoQuote.symbol.ilike(f"%{query}%"))
+            symbol_match | ticker_match | name_match
+        ).order_by(
+            case(
+                [(symbol_match, 0), (ticker_match, 1), (name_match, 2)],
+                else_=3
+            )
         ).limit(10).all()
     else:
+        symbol_match = StockQuote.symbol.ilike(f"%{query}%")
+        ticker_match = StockQuote.ticker.ilike(f"%{query}%")
+        name_match = StockQuote.name.ilike(f"%{query}%")
         tickers = session.query(StockQuote).filter(
-            (StockQuote.ticker.ilike(f"%{query}%")) | (StockQuote.name.ilike(f"%{query}%")) | (StockQuote.symbol.ilike(f"%{query}%"))
+            symbol_match | ticker_match | name_match
+        ).order_by(
+            case(
+                [(symbol_match, 0), (ticker_match, 1), (name_match, 2)],
+                else_=3
+            )
         ).limit(10).all()
+
     session.close()
     return jsonify([{"ticker": t.ticker, "name": t.name, "symbol": t.symbol} for t in tickers])
 
