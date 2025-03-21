@@ -28,7 +28,7 @@ def main():
     output_file = os.path.join("instance", "combined_codebase.txt")
     
     # Files or directories to exclude for .py files
-    exclude_py_dirs = {"templates", "static", "instance" , "venv"}
+    exclude_py_dirs = {"templates", "static", "instance" , "venv" , "migrations"}
     exclude_py_files = {"concat_code.py"}  # update as needed
 
     # 1. Gather all .py files recursively in the project, excluding certain directories/files

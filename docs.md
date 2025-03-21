@@ -17,3 +17,5 @@ Features
 
 
 Data Model
+# TODO
+- make sure ticker sync work ok (UI and Logic now it sync all no matter what)
