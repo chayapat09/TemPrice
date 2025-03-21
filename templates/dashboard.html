@@ -523,20 +523,21 @@
               <canvas id="stockChart"></canvas>
               <div id="loadingIndicator" class="loading hidden">Loading chart data...</div>
             </div>
-            <div class="stats-grid">
-              <div class="stat-card">
+            <!-- Stats Grid -->
+            <div class="stats-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px;">
+              <div class="stat-card" style="border: 1px solid var(--border); border-radius: 6px; padding: 15px;">
                 <div class="stat-label">Period High</div>
                 <div class="stat-value" id="periodHigh">$0.00</div>
               </div>
-              <div class="stat-card">
+              <div class="stat-card" style="border: 1px solid var(--border); border-radius: 6px; padding: 15px;">
                 <div class="stat-label">Period Low</div>
                 <div class="stat-value" id="periodLow">$0.00</div>
               </div>
-              <div class="stat-card">
+              <div class="stat-card" style="border: 1px solid var(--border); border-radius: 6px; padding: 15px;">
                 <div class="stat-label">Average Volume</div>
                 <div class="stat-value" id="avgVolume">0</div>
               </div>
-              <div class="stat-card">
+              <div class="stat-card" style="border: 1px solid var(--border); border-radius: 6px; padding: 15px;">
                 <div class="stat-label">Period Change</div>
                 <div class="stat-value" id="periodChange">0.00%</div>
               </div>
