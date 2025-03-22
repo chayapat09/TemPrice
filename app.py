@@ -10,7 +10,7 @@ from decimal import Decimal
 from flask import Flask, jsonify, request, render_template, current_app
 from sqlalchemy import (BigInteger, Column, Date, DateTime, DECIMAL, Integer, String, create_engine, func, text,
                         ForeignKey, ForeignKeyConstraint)
-from sqlalchemy.orm import sessionmaker, relationship, declarative_base
+from sqlalchemy.orm import sessionmaker, relationship, declarative_base, foreign
 from sqlalchemy.exc import SQLAlchemyError
 from apscheduler.schedulers.background import BackgroundScheduler
 from rapidfuzz import fuzz
@@ -30,7 +30,8 @@ REGULAR_TTL = 15
 NOT_FOUND_TTL = 1440
 QUERY_COUNTER_SAVE_INTERVAL_MINUTES = 5
 DELTA_SYNC_INTERVAL_DAYS = 1
-
+# Binance API Helper
+BASE_BINANCE_URL = "https://api.binance.com"
 # New configuration for currency data (AlphaVantage)
 ALPHAVANTAGE_API_KEY = "DB7QO6ZGF7BMMJCD"  # Replace with your own API key
 CURRENCY_LIST_URL = "https://www.alphavantage.co/physical_currency_list/"
@@ -75,24 +76,28 @@ class Asset(Base):
 
 class StockAsset(Asset):
     __tablename__ = 'stock_assets'
-    asset_type = Column(String(10), ForeignKey('assets.asset_type'), primary_key=True)
-    symbol = Column(String(20), ForeignKey('assets.symbol'), primary_key=True)
+    asset_type = Column(String(10), primary_key=True)
+    symbol = Column(String(20), primary_key=True)
     exchange = Column(String(50))
     region = Column(String(10))
     language = Column(String(10))
     quote_type = Column(String(20))
     full_exchange_name = Column(String(100))
     first_trade_date = Column(Date)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ['asset_type', 'symbol'],
+            ['assets.asset_type', 'assets.symbol']
+        ),
+    )
     __mapper_args__ = {
-        'polymorphic_identity': 'STOCK',
-        # Explicit join condition to resolve ambiguity:
-        'inherit_condition': (StockAsset.asset_type == Asset.asset_type) & (StockAsset.symbol == Asset.symbol)
+        'polymorphic_identity': 'STOCK'
     }
 
 class CryptoAsset(Asset):
     __tablename__ = 'crypto_assets'
-    asset_type = Column(String(10), ForeignKey('assets.asset_type'), primary_key=True)
-    symbol = Column(String(20), ForeignKey('assets.symbol'), primary_key=True)
+    asset_type = Column(String(10), primary_key=True)
+    symbol = Column(String(20), primary_key=True)
     image = Column(String(200))
     ath = Column(DECIMAL(15, 2))
     ath_date = Column(DateTime)
@@ -100,18 +105,28 @@ class CryptoAsset(Asset):
     atl_date = Column(DateTime)
     total_supply = Column(BigInteger)
     max_supply = Column(BigInteger)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ['asset_type', 'symbol'],
+            ['assets.asset_type', 'assets.symbol']
+        ),
+    )
     __mapper_args__ = {
-        'polymorphic_identity': 'CRYPTO',
-        'inherit_condition': (CryptoAsset.asset_type == Asset.asset_type) & (CryptoAsset.symbol == Asset.symbol)
+        'polymorphic_identity': 'CRYPTO'
     }
 
 class CurrencyAsset(Asset):
     __tablename__ = 'currency_assets'
-    asset_type = Column(String(10), ForeignKey('assets.asset_type'), primary_key=True)
-    symbol = Column(String(20), ForeignKey('assets.symbol'), primary_key=True)
+    asset_type = Column(String(10), primary_key=True)
+    symbol = Column(String(20), primary_key=True)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ['asset_type', 'symbol'],
+            ['assets.asset_type', 'assets.symbol']
+        ),
+    )
     __mapper_args__ = {
-        'polymorphic_identity': 'CURRENCY',
-        'inherit_condition': (CurrencyAsset.asset_type == Asset.asset_type) & (CurrencyAsset.symbol == Asset.symbol)
+        'polymorphic_identity': 'CURRENCY'
     }
 
 # ----- AssetQuote: Represents a quote (price pairing) between two Assets -----
@@ -661,14 +676,115 @@ def delta_sync_stocks():
     session.close()
     logger.info("Delta Sync for Stocks Completed.")
 
+# Crypto Data Fetching & Database Update
+def fetch_coingecko_data():
+    logger.info("Fetching crypto metadata from CoinGecko...")
+    url = "https://api.coingecko.com/api/v3/coins/markets"
+    params = {
+        "vs_currency": "usd",
+        "order": "market_cap_desc",
+        "per_page": 250,
+        "page": 1,
+        "sparkline": "false"
+    }
+    headers = {"accept": "application/json"}
+    try:
+        response = requests.get(url, params=params, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            logger.info(f"Fetched metadata for {len(data)} cryptocurrencies.")
+            return data
+        else:
+            logger.error("Error fetching crypto metadata: " + response.text)
+            return []
+    except Exception as e:
+        logger.error("Exception fetching crypto metadata: " + str(e))
+        return []
+
+def fetch_coingecko_data_for_ticker(coin_id):
+    logger.info(f"Fetching data for crypto ticker: {coin_id}")
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            return data
+        else:
+            logger.error(f"Error fetching crypto data for {coin_id}: {response.text}")
+            return None
+    except Exception as e:
+        logger.error(f"Exception fetching crypto data for {coin_id}: {e}")
+        return None
+
+def fetch_binance_crypto_data(symbol, start_date, end_date):
+    logger.info(f"Fetching Binance historical data for {symbol}...")
+    try:
+        if start_date:
+            start_ts = int(datetime.datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
+        else:
+            start_ts = int(datetime.datetime.now().timestamp() * 1000) - (5 * 365 * 24 * 60 * 60 * 1000)
+        if end_date:
+            end_ts = int(datetime.datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
+        else:
+            end_ts = int(datetime.datetime.now().timestamp() * 1000)
+    except Exception as e:
+        logger.error(f"Error processing dates for symbol {symbol}: {e}")
+        return pd.DataFrame()
+
+    limit = 1000
+    klines = []
+    current_start = start_ts
+    url = BASE_BINANCE_URL + "/api/v3/klines"
+    
+    while current_start < end_ts:
+        try:
+            params = {
+                "symbol": symbol,
+                "interval": "1d",
+                "startTime": current_start,
+                "endTime": end_ts,
+                "limit": limit
+            }
+            response = safe_get(url, params=params)
+            data = response.json()
+        except Exception as e:
+            logger.error(f"Error fetching data for symbol {symbol} starting at {current_start}: {e}")
+            break
+        
+        if not data:
+            break
+        
+        klines.extend(data)
+        last_time = data[-1][0]
+        if last_time == current_start:
+            break
+        current_start = last_time + 1
+        time.sleep(0.1)
+    
+    if not klines:
+        return pd.DataFrame()
+    
+    try:
+        df = pd.DataFrame(klines, columns=["open_time", "open", "high", "low", "close", "volume", "close_time",
+                                           "quote_asset_volume", "num_trades", "taker_buy_base", "taker_buy_quote", "ignore"])
+        df["open_time"] = pd.to_datetime(df["open_time"], unit='ms')
+        df.set_index("open_time", inplace=True)
+        df = df.astype({"open": "float", "high": "float", "low": "float", "close": "float", "volume": "float"})
+    except Exception as e:
+        logger.error(f"Error processing DataFrame for symbol {symbol}: {e}")
+        return pd.DataFrame()
+    
+    return df
+
+
 def full_sync_crypto():
     logger.info("Starting Full Sync for Cryptocurrencies...")
-    crypto_data = fetch_coingecko_data()  # Assume this function exists and returns a list of crypto metadata
+    crypto_data = fetch_coingecko_data() 
     historical_data = {}
     for coin in crypto_data:
         coin_id = coin.get("id")
         coin_symbol = coin.get("symbol").upper()
-        df = fetch_binance_crypto_data(coin_symbol + "USDT", HISTORICAL_START_DATE, None)  # Assume this function exists
+        df = fetch_binance_crypto_data(coin_symbol + "USDT", HISTORICAL_START_DATE, None)
         historical_data[coin_id] = df
         time.sleep(REQUEST_DELAY_SECONDS)
     update_crypto_database(crypto_data, historical_data, upsert=False)
@@ -689,7 +805,7 @@ def delta_sync_crypto():
     session.close()
     today = datetime.datetime.now().date()
     two_days_ago = today - datetime.timedelta(days=2)
-    crypto_data = fetch_coingecko_data()  # Assume this function exists
+    crypto_data = fetch_coingecko_data()
     historical_data = {}
     for coin in crypto_data:
         coin_id = coin.get("id")
@@ -838,7 +954,7 @@ def refresh_currency_prices():
 def refresh_all_latest_prices():
     refresh_stock_top_n_tickers()
     refresh_crypto_prices()
-    refresh_currency_prices()
+    # refresh_currency_prices()
     global last_cache_refresh
     last_cache_refresh = datetime.datetime.now()
 
@@ -1125,7 +1241,7 @@ def sync_full():
                 else:
                     return jsonify({"error": f"Failed to fetch data for stock ticker {ticker}"}), 404
             elif asset_type == "CRYPTO":
-                coin_data = fetch_coingecko_data_for_ticker(ticker)  # Assume this exists
+                coin_data = fetch_coingecko_data_for_ticker(ticker)
                 if coin_data:
                     symbol = coin_data["symbol"].upper()
                     historical_data = fetch_binance_crypto_data(symbol + "USDT", HISTORICAL_START_DATE, None)
