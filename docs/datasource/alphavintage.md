@@ -196,3 +196,5 @@ BBD,Barbadian Dollar
 ```
 
 but we already has this file on `./data/physical_currency_list.csv` please read from that file
+
+please add support for currency price data to this system with realtime cache price data update every 6HR , and ingest all data pair with to_symbol = USD (all currency against USD) , delta , full sync has same feature/frequency as other type of data , and for this data asset_type = 'CURRENCY'

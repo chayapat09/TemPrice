@@ -5,15 +5,15 @@ import time
 from collections import Counter
 from apscheduler.schedulers.background import BackgroundScheduler
 from models import Session, AssetQuote, AssetOHLCV, DeltaSyncState, Asset
-from sync import full_sync_stocks, full_sync_crypto, delta_sync_stocks, delta_sync_crypto, refresh_all_latest_prices, latest_cache, last_cache_refresh
+from sync import full_sync_stocks, full_sync_crypto, delta_sync_stocks, delta_sync_crypto, full_sync_currency, delta_sync_currency, refresh_all_latest_prices, latest_cache, last_cache_refresh , refresh_currency_prices
 from utils import load_query_counter, save_query_counter, query_counter, prepopulate_currency_assets
 import logging
+from data_fetchers import StockDataSource, CryptoDataSource, CurrencyDataSource
 
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
 api_stats = Counter()
-
+app = Flask(__name__)
 @app.before_request
 def before_request():
     if request.path.startswith('/api/'):
@@ -126,12 +126,13 @@ def get_latest():
     finally:
         session.close()
     timestamp = latest_cache.get(ds_key, (None, datetime.datetime.now()))[1]
-    from data_fetchers import StockDataSource, CryptoDataSource
     result = None
     if asset_type == "STOCK":
         result = StockDataSource.get_latest_price(asset_quote.source_ticker) if asset_quote else "NOT_FOUND"
-    else:
+    elif asset_type == "CRYPTO":
         result = CryptoDataSource.get_latest_price(asset_quote.source_ticker) if asset_quote else "NOT_FOUND"
+    elif asset_type == "CURRENCY":
+        result = CurrencyDataSource.get_latest_price(asset_quote.source_ticker) if asset_quote else "NOT_FOUND"
     if isinstance(result, (int, float)):
         return jsonify({
             "ticker": ticker,
@@ -293,7 +294,14 @@ def sync_full():
     asset_type = data.get("asset_type", "STOCK").upper()
     data_source = data.get("data_source")
     if not data_source:
-        data_source = "YFINANCE" if asset_type == "STOCK" else "BINANCE" if asset_type == "CRYPTO" else None
+        if asset_type == "STOCK":
+            data_source = "YFINANCE"
+        elif asset_type == "CRYPTO":
+            data_source = "BINANCE"
+        elif asset_type == "CURRENCY":
+            data_source = "AlphaVantage"
+        else:
+            data_source = None
     try:
         if ticker:
             if asset_type == "STOCK":
@@ -324,12 +332,22 @@ def sync_full():
                         return jsonify({"error": f"Failed to fetch historical data for crypto ticker {ticker}"}), 404
                 else:
                     return jsonify({"error": f"Failed to fetch metadata for crypto ticker {ticker}"}), 404
+            elif asset_type == "CURRENCY":
+                if data_source.upper() != "ALPHAVANTAGE":
+                    return jsonify({"error": "Invalid data source for CURRENCY. Supported: AlphaVantage"}), 400
+                from sync import full_sync_currency
+                full_sync_currency()
+                return jsonify({"message": f"Full sync for currency ticker {ticker} completed using {data_source}."})
             else:
                 return jsonify({"error": "Invalid asset_type"}), 400
         else:
             if asset_type == "CRYPTO":
                 full_sync_crypto()
                 return jsonify({"message": "Global full sync for cryptocurrencies completed."})
+            elif asset_type == "CURRENCY":
+                from sync import full_sync_currency
+                full_sync_currency()
+                return jsonify({"message": "Global full sync for currencies completed."})
             else:
                 full_sync_stocks()
                 return jsonify({"message": "Global full sync for stocks completed."})
@@ -344,7 +362,14 @@ def sync_delta():
     asset_type = data.get("asset_type", "STOCK").upper()
     data_source = data.get("data_source")
     if not data_source:
-        data_source = "YFINANCE" if asset_type == "STOCK" else "BINANCE" if asset_type == "CRYPTO" else None
+        if asset_type == "STOCK":
+            data_source = "YFINANCE"
+        elif asset_type == "CRYPTO":
+            data_source = "BINANCE"
+        elif asset_type == "CURRENCY":
+            data_source = "AlphaVantage"
+        else:
+            data_source = None
     try:
         if ticker:
             today = datetime.datetime.now().date()
@@ -377,12 +402,21 @@ def sync_delta():
                         return jsonify({"error": f"Failed to fetch delta historical data for crypto ticker {ticker}"}), 404
                 else:
                     return jsonify({"error": f"Failed to fetch metadata for crypto ticker {ticker}"}), 404
+            elif asset_type == "CURRENCY":
+                if data_source.upper() != "ALPHAVANTAGE":
+                    return jsonify({"error": "Invalid data source for CURRENCY. Supported: AlphaVantage"}), 400
+                from sync import delta_sync_currency
+                delta_sync_currency()
+                return jsonify({"message": f"Delta sync for currencies completed using {data_source}."})
             else:
                 return jsonify({"error": "Invalid asset_type"}), 400
         else:
             if asset_type == "CRYPTO":
                 delta_sync_crypto()
                 return jsonify({"message": "Global delta sync for cryptocurrencies completed."})
+            elif asset_type == "CURRENCY":
+                delta_sync_currency()
+                return jsonify({"message": "Global delta sync for currencies completed."})
             else:
                 delta_sync_stocks()
                 return jsonify({"message": "Global delta sync for stocks completed."})
@@ -411,11 +445,12 @@ if __name__ == "__main__":
     prepopulate_currency_assets()
     refresh_all_latest_prices()
     load_query_counter()
-    from config import FLASK_HOST, FLASK_PORT, LATEST_CACHE_REFRESH_INTERVAL_MINUTES, DELTA_SYNC_INTERVAL_DAYS, QUERY_COUNTER_SAVE_INTERVAL_MINUTES
+    from config import FLASK_HOST, FLASK_PORT, LATEST_CACHE_REFRESH_INTERVAL_MINUTES, DELTA_SYNC_INTERVAL_DAYS, QUERY_COUNTER_SAVE_INTERVAL_MINUTES, CURRENCY_CACHE_REFRESH_INTERVAL_MINUTES
     scheduler = BackgroundScheduler()
     scheduler.add_job(refresh_all_latest_prices, "interval", minutes=LATEST_CACHE_REFRESH_INTERVAL_MINUTES, id="cache_refresh")
     scheduler.add_job(delta_sync_stocks, "interval", days=DELTA_SYNC_INTERVAL_DAYS, id="delta_sync_stocks")
     scheduler.add_job(delta_sync_crypto, "interval", days=DELTA_SYNC_INTERVAL_DAYS, id="delta_sync_crypto")
     scheduler.add_job(save_query_counter, "interval", minutes=QUERY_COUNTER_SAVE_INTERVAL_MINUTES, id="save_query_counter")
+    scheduler.add_job(refresh_currency_prices, "interval", minutes=CURRENCY_CACHE_REFRESH_INTERVAL_MINUTES, id="currency_cache_refresh")
     scheduler.start()
     app.run(host=FLASK_HOST, port=FLASK_PORT)

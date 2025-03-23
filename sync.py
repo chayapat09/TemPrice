@@ -54,7 +54,7 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
             quote_currency = exchange_currency_map.get(exchange, "USD")
             currency_asset = session.query(CurrencyAsset).filter_by(asset_type="CURRENCY", symbol=quote_currency).first()
             if not currency_asset:
-                currency_asset = CurrencyAsset(asset_type="CURRENCY", symbol=quote_currency, name=quote_currency)
+                currency_asset = CurrencyAsset(asset_type="CURRENCY", symbol=quote_currency, name=quote_currency, source_asset_key=quote_currency)
                 session.add(currency_asset)
             
             composite_ticker = ticker + quote_currency
@@ -147,7 +147,7 @@ def update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False):
             quote_currency = "USDT"
             currency_asset = session.query(CurrencyAsset).filter_by(asset_type="CURRENCY", symbol=quote_currency).first()
             if not currency_asset:
-                currency_asset = CurrencyAsset(asset_type="CURRENCY", symbol=quote_currency, name="Tether USD")
+                currency_asset = CurrencyAsset(asset_type="CURRENCY", symbol=quote_currency, name="Tether USD", source_asset_key=quote_currency)
                 session.add(currency_asset)
             
             composite_ticker = coin_symbol + quote_currency
@@ -193,6 +193,71 @@ def update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False):
     except SQLAlchemyError as e:
         session.rollback()
         logger.error(f"Error updating crypto assets and quotes: {e}")
+        raise
+    finally:
+        session.close()
+
+def update_currency_asset_and_quote(currency_list, historical_data, upsert=False):
+    session = Session()
+    try:
+        data_source = session.query(DataSource).filter_by(name="AlphaVantage").first()
+        if not data_source:
+            data_source = DataSource(name="AlphaVantage", description="AlphaVantage FX data source")
+            session.add(data_source)
+            session.commit()
+
+        for currency_code, currency_name in currency_list:
+            asset = session.query(Asset).filter_by(asset_type="CURRENCY", symbol=currency_code).first()
+            if not asset:
+                asset = CurrencyAsset(asset_type="CURRENCY", symbol=currency_code, name=currency_name, source_asset_key=currency_code)
+                session.add(asset)
+            else:
+                asset.name = currency_name
+                asset.source_asset_key = currency_code
+            
+            composite_ticker = currency_code + "USD"
+            asset_quote = session.query(AssetQuote).filter_by(ticker=composite_ticker, data_source_id=data_source.id).first()
+            if not asset_quote:
+                asset_quote = AssetQuote(
+                    from_asset_type="CURRENCY",
+                    from_asset_symbol=currency_code,
+                    to_asset_type="CURRENCY",
+                    to_asset_symbol="USD",
+                    data_source_id=data_source.id,
+                    ticker=composite_ticker,
+                    source_ticker=currency_code
+                )
+                session.add(asset_quote)
+            else:
+                asset_quote.source_ticker = currency_code
+
+            if currency_code in historical_data and historical_data[currency_code] != None:
+                df = historical_data[currency_code]
+                for date, row_data in df.iterrows():
+                    price_date = date if isinstance(date, datetime.datetime) else datetime.datetime.combine(date, datetime.time())
+                    exists = session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id, price_date=price_date).first()
+                    if exists:
+                        if upsert:
+                            exists.open_price = safe_convert(row_data.get("Open"), float)
+                            exists.high_price = safe_convert(row_data.get("High"), float)
+                            exists.low_price = safe_convert(row_data.get("Low"), float)
+                            exists.close_price = safe_convert(row_data.get("Close"), float)
+                            exists.volume = None
+                    else:
+                        ohlcv = AssetOHLCV(
+                            asset_quote=asset_quote,
+                            price_date=price_date,
+                            open_price=safe_convert(row_data.get("Open"), float),
+                            high_price=safe_convert(row_data.get("High"), float),
+                            low_price=safe_convert(row_data.get("Low"), float),
+                            close_price=safe_convert(row_data.get("Close"), float),
+                            volume=None
+                        )
+                        session.add(ohlcv)
+        session.commit()
+    except SQLAlchemyError as e:
+        session.rollback()
+        logger.error(f"Error updating currency assets and quotes: {e}")
         raise
     finally:
         session.close()
@@ -289,6 +354,7 @@ def full_sync_crypto():
     logger.info("Global Full Sync for Cryptocurrencies Completed.")
 
 def delta_sync_crypto():
+    from config import HISTORICAL_START_DATE, REQUEST_DELAY_SECONDS
     logger.info("Starting Global Delta Sync for Cryptocurrencies...")
     session = Session()
     state = session.query(DeltaSyncState).filter_by(id=1).first()
@@ -320,6 +386,87 @@ def delta_sync_crypto():
         session.close()
     logger.info("Global Delta Sync for Cryptocurrencies Completed.")
 
+def full_sync_currency():
+    from config import HISTORICAL_START_DATE, REQUEST_DELAY_SECONDS
+    logger.info("Starting Global Full Sync for Currencies...")
+    from utils import get_currency_list
+    currency_list = get_currency_list()
+    historical_data = {}
+    from data_fetchers import fetch_fx_daily_data
+    for currency_code, _ in currency_list:
+        if currency_code.upper() == "USD":
+            import pandas as pd
+            df = pd.DataFrame({
+                "Open": [1.0],
+                "High": [1.0],
+                "Low": [1.0],
+                "Close": [1.0]
+            }, index=[pd.to_datetime(HISTORICAL_START_DATE)])
+            historical_data[currency_code] = df
+        else:
+            df = fetch_fx_daily_data(currency_code, "USD", outputsize="full")
+            historical_data[currency_code] = df
+        time.sleep(REQUEST_DELAY_SECONDS)
+    update_currency_asset_and_quote(currency_list, historical_data, upsert=False)
+    session = Session()
+    try:
+        state = session.query(DeltaSyncState).filter_by(id=1).first()
+        if not state:
+            state = DeltaSyncState(id=1)
+        state.last_full_sync = datetime.datetime.now()
+        session.merge(state)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error updating delta sync state for currency full sync: {e}")
+        raise
+    finally:
+        session.close()
+    logger.info("Global Full Sync for Currencies Completed.")
+
+def delta_sync_currency():
+    from config import REQUEST_DELAY_SECONDS
+    logger.info("Starting Global Delta Sync for Currencies...")
+    session = Session()
+    state = session.query(DeltaSyncState).filter_by(id=1).first()
+    session.close()
+    today = datetime.datetime.now().date()
+    two_days_ago = today - datetime.timedelta(days=2)
+    from utils import get_currency_list
+    currency_list = get_currency_list()
+    historical_data = {}
+    from data_fetchers import fetch_fx_daily_data
+    for currency_code, _ in currency_list:
+        if currency_code.upper() == "USD":
+            import pandas as pd
+            df = pd.DataFrame({
+                "Open": [1.0],
+                "High": [1.0],
+                "Low": [1.0],
+                "Close": [1.0]
+            }, index=[pd.to_datetime(two_days_ago.strftime("%Y-%m-%d"))])
+            historical_data[currency_code] = df
+        else:
+            df = fetch_fx_daily_data(currency_code, "USD", outputsize="full")
+            historical_data[currency_code] = df
+        time.sleep(REQUEST_DELAY_SECONDS)
+    update_currency_asset_and_quote(currency_list, historical_data, upsert=True)
+    session = Session()
+    try:
+        state = session.query(DeltaSyncState).filter_by(id=1).first()
+        if not state:
+            state = DeltaSyncState(id=1)
+        state.last_delta_sync = datetime.datetime.now()
+        session.merge(state)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error updating delta sync state for currency delta sync: {e}")
+        raise
+    finally:
+        session.close()
+    logger.info("Global Delta Sync for Currencies Completed.")
+
 # Latest price cache and refresh functions
 latest_cache = {}
 last_cache_refresh = None
@@ -349,10 +496,23 @@ def refresh_crypto_prices():
     for ticker, price in prices.items():
         latest_cache[(ds_name, ticker)] = (price, now)
 
+def refresh_currency_prices():
+    from data_fetchers import CurrencyDataSource
+    from utils import get_currency_list
+    currency_list = get_currency_list()
+    codes = [code for code, name in currency_list]
+    prices = CurrencyDataSource.refresh_latest_prices(codes)
+    now = datetime.datetime.now()
+    ds_name = "AlphaVantage"
+    for code in codes:
+        if code in prices:
+            latest_cache[(ds_name, code)] = (prices[code], now)
+
 def refresh_all_latest_prices():
     from config import REQUEST_DELAY_SECONDS, TOP_N_TICKERS
     from utils import query_counter
     refresh_stock_top_n_tickers(query_counter, TOP_N_TICKERS, REQUEST_DELAY_SECONDS)
     refresh_crypto_prices()
+    refresh_currency_prices()
     global last_cache_refresh
     last_cache_refresh = datetime.datetime.now()

@@ -414,7 +414,6 @@
                   <tr>
                     <th>Table</th>
                     <th>Records</th>
-                    <th>Last Updated</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -455,6 +454,7 @@
             <select id="sync-asset-type" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border);">
               <option value="STOCK">Stock</option>
               <option value="CRYPTO">Crypto</option>
+              <option value="CURRENCY">Currency</option>
             </select>
             <input type="text" id="sync-ticker-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px; margin-left: 0.5rem;">
             <div id="sync-ticker-suggestions" class="autocomplete-suggestions" style="display: none;"></div>
@@ -491,6 +491,7 @@
               <select id="asset-type-select" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border);">
                 <option value="STOCK" selected>Stock</option>
                 <option value="CRYPTO">Crypto</option>
+                <option value="CURRENCY">Currency</option>
               </select>
               <input type="text" id="ticker-search-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px;">
               <div id="ticker-search-suggestions" class="autocomplete-suggestions" style="display: none;"></div>
@@ -582,18 +583,6 @@
                 <span style="display: flex; align-items: center;"><span class="success-dot"></span> Updated</span>
               </div>
               <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                <span>Cache Size</span>
-                <span id="cache-size">Loading...</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                <span>Last Full Sync</span>
-                <span id="last-full-sync">Loading...</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                <span>Last Delta Sync</span>
-                <span id="last-delta-sync">Loading...</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
                 <span>Next Cache Refresh</span>
                 <span id="next-cache-refresh">Loading...</span>
               </div>
@@ -602,56 +591,23 @@
               <h3 style="margin-bottom: 1rem;">Scheduled Jobs</h3>
               <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
                 <span>Cache Refresh</span>
-                <span>Every 5 minutes</span>
+                <span>Every 1 minute</span>
               </div>
               <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                <span>Delta Sync</span>
+                <span>Currency Cache Refresh</span>
+                <span>Every 6 hours</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                <span>Delta Sync (All)</span>
                 <span>Daily</span>
               </div>
             </div>
             <div>
               <h3 style="margin-bottom: 1rem;">API Stats (24h)</h3>
-              <div id="api-stats"></div>
-            </div>
-          </div>
-        </div>
-        <div class="card" id="data-quality-summary">
-          <div class="card-header">
-            <h2>Database Data Quality Summary</h2>
-          </div>
-          <div style="padding: 1rem;">
-            <div class="table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Metric</th>
-                    <th>Value</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody id="data-quality-body">
-                  <tr>
-                    <td>Total Tickers</td>
-                    <td id="dq-total-tickers">-</td>
-                    <td><span class="badge badge-success">Good</span></td>
-                  </tr>
-                  <tr>
-                    <td>Records Completeness</td>
-                    <td id="dq-completeness">-</td>
-                    <td><span class="badge badge-success">Good</span></td>
-                  </tr>
-                  <tr>
-                    <td>Missing Fields</td>
-                    <td id="dq-missing-fields">-</td>
-                    <td><span class="badge badge-warning">Warning</span></td>
-                  </tr>
-                  <tr>
-                    <td>Duplicate Entries</td>
-                    <td id="dq-duplicates">-</td>
-                    <td><span class="badge badge-danger">Attention</span></td>
-                  </tr>
-                </tbody>
-              </table>
+              <div style="display: flex; justify-content: space-between;">
+                <span>Total Requests:</span>
+                <span id="api-stats">Loading...</span>
+              </div>
             </div>
           </div>
         </div>
@@ -695,9 +651,6 @@
         document.getElementById('db-size').textContent = data.db_size;
         document.getElementById('cache-hit-rate').textContent = data.cache_hit_rate;
         document.getElementById('api-requests-24h').textContent = data.api_requests_24h;
-        document.getElementById('cache-size').textContent = `${data.cache_size} tickers`;
-        document.getElementById('last-full-sync').textContent = data.last_full_sync || 'Never';
-        document.getElementById('last-delta-sync').textContent = data.last_delta_sync || 'Never';
 
         const dbSummaryBody = document.getElementById('db-summary-body');
         dbSummaryBody.innerHTML = '';
@@ -705,33 +658,13 @@
           dbSummaryBody.innerHTML += `<tr>
             <td>${table}</td>
             <td>${records}</td>
-            <td>${data.last_delta_sync || 'Never'}</td>
             <td><span class="badge badge-success">Up to date</span></td>
           </tr>`;
         }
-
-        const regionDistribution = document.getElementById('region-distribution');
-        regionDistribution.innerHTML = '';
-        if (data.region_distribution) {
-          for (const [region, info] of Object.entries(data.region_distribution)) {
-            regionDistribution.innerHTML += `<div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-              <span>${region}</span>
-              <span>${info.count} (${info.percentage.toFixed(1)}%)</span>
-            </div><div class="progress"><div class="progress-bar" style="width: ${info.percentage}%;"></div></div>`;
-          }
-        } else {
-          regionDistribution.innerHTML = '<p>Region distribution data not available.</p>';
-        }
-
-        const apiStats = document.getElementById('api-stats');
-        apiStats.innerHTML = '';
-        for (const [path, count] of Object.entries(data.api_stats)) {
-          apiStats.innerHTML += `<div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-            <span>${path}</span>
-            <span>${count} requests</span>
-          </div>`;
-        }
-      });
+        // Update API Stats section with total requests.
+        document.getElementById('api-stats').textContent = data.api_requests_24h + " requests";
+      })
+      .catch(err => console.error('Error fetching stats:', err));
 
     // Fuzzy search with updated fuzzy parameter
     function setupAutocomplete(inputId, suggestionsId, assetTypeSelectorId) {
@@ -886,14 +819,14 @@
     let currentPage = 1;
     const rowsPerPage = 10;
 
-    function fetchHistoricalData(ticker, assetType) {
-      fetch(`/api/unified?ticker=${ticker}&asset_type=${assetType}`)
+    function fetchHistoricalData(ticker) {
+      // Call /api/unified with ticker only, as per app.py
+      fetch(`/api/unified?ticker=${ticker}`)
         .then(response => {
           if (!response.ok) throw new Error('Ticker not found');
           return response.json();
         })
         .then(data => {
-          // Build meta information using the new keys
           let metaHtml = `
             <p><strong>Ticker:</strong> ${data.ticker}</p>
             <p><strong>Source Ticker:</strong> ${data.source_ticker}</p>
@@ -1082,15 +1015,14 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-      // Load initial ticker data for default ticker
-      fetchHistoricalData('AAPL', 'STOCK');
+      // Load initial ticker data for default ticker (e.g., AAPL)
+      fetchHistoricalData('AAPL');
 
       document.getElementById('ticker-search-btn').addEventListener('click', () => {
         const ticker = document.getElementById('ticker-search-input').value.trim();
-        const assetType = document.getElementById('asset-type-select').value;
         if (ticker) {
           currentPage = 1;
-          fetchHistoricalData(ticker, assetType);
+          fetchHistoricalData(ticker);
         }
       });
 

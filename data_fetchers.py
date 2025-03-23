@@ -228,3 +228,73 @@ class CryptoDataSource:
         except Exception as e:
             logger.error(f"Error fetching latest price for crypto {ticker}: {e}")
             return None
+
+# Currency Data Fetching Functions
+
+def fetch_fx_realtime(from_currency, to_currency="USD"):
+    from config import ALPHAVANTAGE_API_KEY
+    url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "CURRENCY_EXCHANGE_RATE",
+        "from_currency": from_currency,
+        "to_currency": to_currency,
+        "apikey": ALPHAVANTAGE_API_KEY
+    }
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            rate_info = data.get("Realtime Currency Exchange Rate", {})
+            rate = rate_info.get("5. Exchange Rate")
+            if rate:
+                return float(rate)
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching realtime FX data for {from_currency}/{to_currency}: {e}")
+        return None
+
+def fetch_fx_daily_data(from_currency, to_currency="USD", outputsize="compact"):
+    from config import ALPHAVANTAGE_API_KEY
+    url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "FX_DAILY",
+        "from_symbol": from_currency,
+        "to_symbol": to_currency,
+        "outputsize": outputsize,
+        "apikey": ALPHAVANTAGE_API_KEY
+    }
+    try:
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            time_series = data.get("Time Series FX (Daily)", {})
+            if time_series:
+                df = pd.DataFrame.from_dict(time_series, orient='index')
+                df.index = pd.to_datetime(df.index)
+                df = df.rename(columns={
+                    "1. open": "Open",
+                    "2. high": "High",
+                    "3. low": "Low",
+                    "4. close": "Close"
+                })
+                df = df.astype(float)
+                return df
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching FX daily data for {from_currency}/{to_currency}: {e}")
+        return None
+
+class CurrencyDataSource:
+    @staticmethod
+    def get_latest_price(currency_code):
+        if currency_code.upper() == "USD":
+            return 1.0
+        return fetch_fx_realtime(currency_code, "USD")
+
+    @staticmethod
+    def refresh_latest_prices(currency_codes):
+        prices = {}
+        for code in currency_codes:
+            price = CurrencyDataSource.get_latest_price(code)
+            prices[code] = price if price is not None else "NOT_FOUND"
+        return prices

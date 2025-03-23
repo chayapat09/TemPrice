@@ -5,8 +5,9 @@ from decimal import Decimal
 from collections import Counter
 import os
 import logging
-from models import Session, QueryCount, CurrencyAsset
+from models import CryptoAsset, Session, QueryCount, CurrencyAsset
 from sqlalchemy.exc import SQLAlchemyError
+import csv
 
 logger = logging.getLogger(__name__)
 
@@ -62,20 +63,33 @@ def save_query_counter():
     finally:
         session.close()
 
+def get_currency_list():
+    currency_list = []
+    file_path = os.path.join("data", "physical_currency_list.csv")
+    if os.path.exists(file_path):
+        with open(file_path, newline='', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                code = row.get("currency code") or row.get("Currency Code")
+                name = row.get("currency name") or row.get("Currency Name")
+                if code and name:
+                    currency_list.append((code.strip().upper(), name.strip()))
+    return currency_list
+
 def prepopulate_currency_assets():
-    currencies = [
-        ("USD", "US Dollar"),
-        ("THB", "Thai Baht"),
-        ("SGD", "Singapore Dollar"),
-        ("USDT", "Tether USD")
-    ]
+    currency_list = get_currency_list()
     session = Session()
     try:
-        for symbol, name in currencies:
-            asset = session.query(CurrencyAsset).filter_by(asset_type="CURRENCY", symbol=symbol).first()
+        for currency_code, currency_name in currency_list:
+            asset = session.query(CurrencyAsset).filter_by(asset_type="CURRENCY", symbol=currency_code).first()
             if not asset:
-                asset_currency = CurrencyAsset(asset_type="CURRENCY", symbol=symbol, name=name)
+                asset_currency = CurrencyAsset(asset_type="CURRENCY", symbol=currency_code, name=currency_name, source_asset_key=currency_code)
                 session.add(asset_currency)
+        usdt_asset = session.query(CryptoAsset).filter_by(asset_type="CRYPTO", symbol="USDT").first()
+        if not usdt_asset:
+            asset_crypto = CryptoAsset(asset_type="CRYPTO", symbol="USDT", name="USD Tether", source_asset_key="tether")
+            session.add(asset_crypto)
+
         session.commit()
     except SQLAlchemyError as e:
         session.rollback()
