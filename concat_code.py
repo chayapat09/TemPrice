@@ -29,7 +29,7 @@ def main():
     
     # Files or directories to exclude for .py files
     exclude_py_dirs = {"templates", "static", "instance" , "venv" , "migrations"}
-    exclude_py_files = {"concat_code.py"}  # update as needed
+    exclude_py_files = {"concat_code.py" , "coder.py"}  # update as needed
 
     # 1. Gather all .py files recursively in the project, excluding certain directories/files
     py_files = gather_files(root_dir, ".py", exclude_dirs=exclude_py_dirs, exclude_files=exclude_py_files)
