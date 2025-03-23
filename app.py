@@ -44,11 +44,14 @@ last_cache_refresh = None
 Base = declarative_base()
 
 # ---------- Asset Models ----------
+# Added new field: source_asset_key to store the key to use for price queries.
+
 class Asset(Base):
     __tablename__ = "assets"
     asset_type = Column(String(10), primary_key=True)  # e.g. STOCK, CRYPTO, CURRENCY
     symbol = Column(String(50), primary_key=True)
     name = Column(String(100))
+    source_asset_key = Column(String(50))  # For stocks: same as symbol; for crypto: coin_id from CoinGecko
     __mapper_args__ = {
         'polymorphic_on': asset_type,
         'polymorphic_identity': 'ASSET'
@@ -104,6 +107,7 @@ class CurrencyAsset(Asset):
     }
 
 # ---------- Data Source Model ----------
+
 class DataSource(Base):
     __tablename__ = "data_sources"
     id = Column(Integer, primary_key=True)
@@ -111,6 +115,7 @@ class DataSource(Base):
     description = Column(String(200), nullable=True)
 
 # ---------- Asset Price / Quote Models ----------
+
 class AssetQuote(Base):
     __tablename__ = "asset_quotes"
     id = Column(Integer, primary_key=True)
@@ -119,8 +124,8 @@ class AssetQuote(Base):
     to_asset_type = Column(String(10))
     to_asset_symbol = Column(String(50))
     data_source_id = Column(Integer, ForeignKey("data_sources.id"))
-    ticker = Column(String(50))          # Derived as from_asset_symbol + to_asset_symbol
-    source_ticker = Column(String(50))   # The ticker provided by the data source
+    ticker = Column(String(50))          # Composite ticker: e.g. for stocks "TSLAUSD", for crypto "BTCUSDT"
+    source_ticker = Column(String(50))   # The key used to query the price datasource (for stocks: TSLA; for crypto: BTCUSDT)
 
     __table_args__ = (
         ForeignKeyConstraint([from_asset_type, from_asset_symbol], ["assets.asset_type", "assets.symbol"]),
@@ -145,6 +150,7 @@ class AssetOHLCV(Base):
     asset_quote = relationship("AssetQuote")
 
 # ---------- Other Models ----------
+
 class DeltaSyncState(Base):
     __tablename__ = "delta_sync_state"
     id = Column(Integer, primary_key=True)
@@ -153,7 +159,7 @@ class DeltaSyncState(Base):
 
 class QueryCount(Base):
     __tablename__ = "query_counts"
-    ticker = Column(String(50), primary_key=True)  # Here ticker refers to the AssetQuote.ticker
+    ticker = Column(String(50), primary_key=True)  # Here ticker refers to the AssetQuote.ticker (composite ticker)
     asset_type = Column(String(10), primary_key=True)
     count = Column(Integer, default=0)
 
@@ -168,6 +174,7 @@ query_counter = Counter()
 last_saved_counts = {}  # Holds last saved query counts
 
 # ---------- Helper Functions ----------
+
 def safe_convert(value, convert_func=lambda x: x):
     if value is None or pd.isna(value):
         return None
@@ -181,6 +188,7 @@ def chunk_list(lst, chunk_size):
         yield lst[i:i + chunk_size]
 
 # ---------- DataSource Helper ----------
+
 def get_or_create_data_source(name, description=None):
     session = Session()
     try:
@@ -197,15 +205,7 @@ def get_or_create_data_source(name, description=None):
     finally:
         session.close()
 
-# Pre-populate DataSources
-ds_yfinance = get_or_create_data_source("yFinance", "Yahoo Finance data source")
-ds_binance = get_or_create_data_source("Binance", "Binance API data source")
-
-# Store their IDs in global constants to avoid detached instance issues
-YFINANCE_ID = ds_yfinance.id
-BINANCE_ID = ds_binance.id
-
-# ---------- Pre-populate Currency Assets ----------
+# Pre-populate Currency Assets (DataSources are now handled within functions)
 def prepopulate_currency_assets():
     currencies = [
         ("USD", "US Dollar"),
@@ -231,6 +231,7 @@ def prepopulate_currency_assets():
 prepopulate_currency_assets()
 
 # ---------- Data Fetching Functions for Stocks ----------
+
 def fetch_yf_data_for_ticker(ticker, start_date=HISTORICAL_START_DATE, end_date=None):
     logger.info(f"Fetching data for stock ticker: {ticker}")
     try:
@@ -290,20 +291,22 @@ def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL
     return quotes_df, historical_data
 
 # ---------- Update Stock Data into New Models ----------
+
 def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
     session = Session()
-    # Mapping for stock exchange to currency symbol
-    exchange_currency_map = {
-        "NMS": "USD",
-        "NYQ": "USD",
-        "SET": "THB"
-    }
     try:
+        # Query or create DataSource for stocks (YFINANCE)
+        data_source = session.query(DataSource).filter_by(name="yFinance").first()
+        if not data_source:
+            data_source = DataSource(name="yFinance", description="Yahoo Finance data source")
+            session.add(data_source)
+            session.commit()  # Commit to ensure the ID is assigned
+
         for idx, row in quotes_df.iterrows():
             ticker = row.get("symbol")
             if not ticker:
                 continue
-            # Determine stock asset details
+            # For stocks, the asset symbol and source_asset_key are the same (e.g. TSLA)
             name = row.get("longName") or row.get("displayName") or ticker
             language = row.get("language")
             region = row.get("region")
@@ -316,10 +319,11 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
             if not asset:
                 asset = StockAsset(asset_type="STOCK", symbol=ticker, name=name, language=language,
                                    region=region, exchange=exchange, full_exchange_name=full_exchange_name,
-                                   first_trade_date=first_trade)
+                                   first_trade_date=first_trade, source_asset_key=ticker)
                 session.add(asset)
             else:
                 asset.name = name
+                asset.source_asset_key = ticker
                 if isinstance(asset, StockAsset):
                     asset.language = language
                     asset.region = region
@@ -328,6 +332,11 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
                     asset.first_trade_date = first_trade
 
             # Determine quote currency based on exchange mapping
+            exchange_currency_map = {
+                "NMS": "USD",
+                "NYQ": "USD",
+                "SET": "THB"
+            }
             quote_currency = exchange_currency_map.get(exchange, "USD")
             # Ensure currency asset exists
             currency_asset = session.query(CurrencyAsset).filter_by(asset_type="CURRENCY", symbol=quote_currency).first()
@@ -335,17 +344,18 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
                 currency_asset = CurrencyAsset(asset_type="CURRENCY", symbol=quote_currency, name=quote_currency)
                 session.add(currency_asset)
             
-            # Upsert AssetQuote (from stock asset to currency asset) using YFINANCE_ID
-            quote_ticker = ticker + quote_currency  # e.g. TSLAUSD
-            asset_quote = session.query(AssetQuote).filter_by(ticker=quote_ticker, data_source_id=YFINANCE_ID).first()
+            # Upsert AssetQuote (from stock asset to currency asset)
+            # For stocks: composite ticker = source_asset_key + quote_currency, source_ticker = stock symbol (e.g. TSLA)
+            composite_ticker = ticker + quote_currency
+            asset_quote = session.query(AssetQuote).filter_by(ticker=composite_ticker, data_source_id=data_source.id).first()
             if not asset_quote:
                 asset_quote = AssetQuote(
                     from_asset_type="STOCK",
                     from_asset_symbol=ticker,
                     to_asset_type="CURRENCY",
                     to_asset_symbol=quote_currency,
-                    data_source_id=YFINANCE_ID,
-                    ticker=quote_ticker,
+                    data_source_id=data_source.id,
+                    ticker=composite_ticker,
                     source_ticker=ticker
                 )
                 session.add(asset_quote)
@@ -385,6 +395,7 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
         session.close()
 
 # ---------- Data Fetching Functions for Crypto ----------
+
 def fetch_coingecko_data():
     logger.info("Fetching crypto metadata from CoinGecko...")
     url = "https://api.coingecko.com/api/v3/coins/markets"
@@ -489,11 +500,21 @@ def fetch_binance_crypto_data(symbol, start_date, end_date):
     return df
 
 # ---------- Update Crypto Data into New Models ----------
+
 def update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False):
     session = Session()
     try:
+        # Query or create DataSource for crypto (Binance)
+        data_source = session.query(DataSource).filter_by(name="Binance").first()
+        if not data_source:
+            data_source = DataSource(name="Binance", description="Binance API data source")
+            session.add(data_source)
+            session.commit()  # Commit to ensure the ID is assigned
+
         for coin in crypto_data:
-            coin_id = coin.get("id")
+            # For crypto, use the uppercase symbol as the asset symbol and the coin_id as source_asset_key.
+            coin_id = coin.get("id")  # e.g. "bitcoin"
+            coin_symbol = coin.get("symbol").upper()  # e.g. "BTC"
             name = coin.get("name")
             image = coin.get("image")
             ath = safe_convert(coin.get("ath"), float)
@@ -504,14 +525,16 @@ def update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False):
             max_supply = safe_convert(coin.get("max_supply"), int)
             
             # Upsert base Asset for crypto (using CryptoAsset)
-            asset = session.query(Asset).filter_by(asset_type="CRYPTO", symbol=coin_id).first()
+            asset = session.query(Asset).filter_by(asset_type="CRYPTO", symbol=coin_symbol).first()
             if not asset:
-                asset = CryptoAsset(asset_type="CRYPTO", symbol=coin_id, name=name, image=image,
+                asset = CryptoAsset(asset_type="CRYPTO", symbol=coin_symbol, name=name, image=image,
                                     ath=ath, ath_date=ath_date, atl=atl, atl_date=atl_date,
-                                    total_supply=total_supply, max_supply=max_supply)
+                                    total_supply=total_supply, max_supply=max_supply,
+                                    source_asset_key=coin_id)
                 session.add(asset)
             else:
                 asset.name = name
+                asset.source_asset_key = coin_id
                 if isinstance(asset, CryptoAsset):
                     asset.image = image
                     asset.ath = ath
@@ -521,31 +544,33 @@ def update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False):
                     asset.total_supply = total_supply
                     asset.max_supply = max_supply
             
-            # For crypto, assume the quote currency is USDT
+            # For crypto, assume the quote currency is always USDT
             quote_currency = "USDT"
             currency_asset = session.query(CurrencyAsset).filter_by(asset_type="CURRENCY", symbol=quote_currency).first()
             if not currency_asset:
                 currency_asset = CurrencyAsset(asset_type="CURRENCY", symbol=quote_currency, name="Tether USD")
                 session.add(currency_asset)
             
-            # Upsert AssetQuote (from crypto asset to currency asset) using BINANCE_ID
-            quote_ticker = coin_id + quote_currency  # e.g. bitcoinUSDT
-            asset_quote = session.query(AssetQuote).filter_by(ticker=quote_ticker, data_source_id=BINANCE_ID).first()
+            # Upsert AssetQuote (from crypto asset to currency asset)
+            # For crypto: composite ticker = asset.symbol + quote_currency, and source_ticker is used to query Binance.
+            composite_ticker = coin_symbol + quote_currency  # e.g. "BTCUSDT"
+            asset_quote = session.query(AssetQuote).filter_by(ticker=composite_ticker, data_source_id=data_source.id).first()
             if not asset_quote:
                 asset_quote = AssetQuote(
                     from_asset_type="CRYPTO",
-                    from_asset_symbol=coin_id,
+                    from_asset_symbol=coin_symbol,
                     to_asset_type="CURRENCY",
                     to_asset_symbol=quote_currency,
-                    data_source_id=BINANCE_ID,
-                    ticker=quote_ticker,
-                    source_ticker=coin.get("symbol").upper()
+                    data_source_id=data_source.id,
+                    ticker=composite_ticker,
+                    source_ticker=composite_ticker
                 )
                 session.add(asset_quote)
             else:
-                asset_quote.source_ticker = coin.get("symbol").upper()
+                asset_quote.source_ticker = composite_ticker
             
             # Insert or update historical OHLCV data from Binance
+            # Note: historical_data keys for crypto are based on coin_id.
             if coin_id in historical_data:
                 df = historical_data[coin_id]
                 for date, row_data in df.iterrows():
@@ -578,6 +603,7 @@ def update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False):
         session.close()
 
 # ---------- Global Sync Functions ----------
+
 def full_sync_stocks():
     logger.info("Starting Global Full Sync for Stocks...")
     query_th = yf.EquityQuery("eq", ["region", "th"])
@@ -639,8 +665,9 @@ def full_sync_crypto():
     historical_data = {}
     for coin in crypto_data:
         coin_id = coin.get("id")
-        coin_symbol = coin.get("symbol").upper() + "USDT"
-        df = fetch_binance_crypto_data(coin_symbol, HISTORICAL_START_DATE, None)
+        # For crypto, we use the composite ticker from the asset symbol (which is coin['symbol'].upper()) + "USDT"
+        symbol = coin.get("symbol").upper() + "USDT"
+        df = fetch_binance_crypto_data(symbol, HISTORICAL_START_DATE, None)
         historical_data[coin_id] = df
         time.sleep(REQUEST_DELAY_SECONDS)
     update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False)
@@ -671,8 +698,8 @@ def delta_sync_crypto():
     historical_data = {}
     for coin in crypto_data:
         coin_id = coin.get("id")
-        coin_symbol = coin.get("symbol").upper() + "USDT"
-        df = fetch_binance_crypto_data(coin_symbol, two_days_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
+        symbol = coin.get("symbol").upper() + "USDT"
+        df = fetch_binance_crypto_data(symbol, two_days_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
         historical_data[coin_id] = df
         time.sleep(REQUEST_DELAY_SECONDS)
     update_crypto_asset_and_quote(crypto_data, historical_data, upsert=True)
@@ -693,6 +720,7 @@ def delta_sync_crypto():
     logger.info("Global Delta Sync for Cryptocurrencies Completed.")
 
 # ---------- Data Source Classes for Latest Price Fetching ----------
+
 class StockDataSource:
     @staticmethod
     def get_latest_price(ticker):
@@ -721,34 +749,52 @@ class StockDataSource:
         return prices
 
 class CryptoDataSource:
-    BASE_URL = "https://api.coingecko.com/api/v3"
+    BASE_URL = "https://api.binance.com/api/v3"
 
     @staticmethod
     def get_all_latest_prices():
-        url = f"{CryptoDataSource.BASE_URL}/coins/markets"
-        params = {
-            "vs_currency": "usd",
-            "order": "market_cap_desc",
-            "per_page": 250,
-            "page": 1,
-            "sparkline": "false"
-        }
-        headers = {"accept": "application/json"}
-        response = requests.get(url, params=params, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            return {coin["id"]: coin["current_price"] for coin in data}
-        return {}
+        url = f"{CryptoDataSource.BASE_URL}/ticker/price"
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                data = response.json()
+                # Return mapping keyed by Binance symbol (e.g. "BTCUSDT")
+                return { item["symbol"]: float(item["price"]) for item in data }
+            return {}
+        except Exception as e:
+            logger.error("Error fetching crypto prices: " + str(e))
+            return {}
 
     @staticmethod
     def get_latest_price(ticker):
-        prices = CryptoDataSource.get_all_latest_prices()
-        return prices.get(ticker, "NOT_FOUND")
+        # ticker should be like "BTCUSDT"
+        url = f"{CryptoDataSource.BASE_URL}/ticker/price"
+        params = {"symbol": ticker}
+        try:
+            response = requests.get(url, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                return float(data["price"])
+            return "NOT_FOUND"
+        except Exception as e:
+            logger.error(f"Error fetching latest price for crypto {ticker}: {e}")
+            return None
 
 def get_latest_price(ticker, asset_type="STOCK"):
-    key = (asset_type.upper(), ticker)
-    # Increment the counter on each /api/latest call
-    query_counter[key] += 1
+    session = Session()
+    try:
+        asset_quote = session.query(AssetQuote).filter_by(ticker=ticker).first()
+        if not asset_quote:
+            return "NOT_FOUND"
+        ds_name = asset_quote.data_source.name.upper() if asset_quote.data_source else "UNKNOWN"
+        source_ticker = asset_quote.source_ticker
+    except SQLAlchemyError as e:
+        logger.error(f"Error fetching asset_quote for ticker {ticker}: {e}")
+        return "FETCH_ERROR"
+    finally:
+        session.close()
+
+    key = (ds_name, source_ticker)
     now = datetime.datetime.now()
     if key in latest_cache:
         value, timestamp = latest_cache[key]
@@ -757,9 +803,9 @@ def get_latest_price(ticker, asset_type="STOCK"):
         elif value is not None and (now - timestamp).total_seconds() / 60 < REGULAR_TTL:
             return value
     if asset_type.upper() == "STOCK":
-        price = StockDataSource.get_latest_price(ticker)
+        price = StockDataSource.get_latest_price(source_ticker)
     else:
-        price = CryptoDataSource.get_latest_price(ticker)
+        price = CryptoDataSource.get_latest_price(source_ticker)
     if price == "NOT_FOUND":
         latest_cache[key] = ("NOT_FOUND", now)
         return "NOT_FOUND"
@@ -769,19 +815,28 @@ def get_latest_price(ticker, asset_type="STOCK"):
     return "FETCH_ERROR"
 
 def refresh_stock_top_n_tickers():
-    top_tickers = [ticker for (atype, ticker), _ in query_counter.most_common(TOP_N_TICKERS) if atype == "STOCK"]
-    for batch in chunk_list(top_tickers, MAX_TICKERS_PER_REQUEST):
-        prices = StockDataSource.refresh_latest_prices(batch)
-        now = datetime.datetime.now()
-        for ticker, price in prices.items():
-            latest_cache[("STOCK", ticker)] = (price, now)
-        time.sleep(REQUEST_DELAY_SECONDS)
+    session = Session()
+    try:
+        # Get composite tickers for top stock queries from query_counter
+        top_keys = [t[1] for t, count in query_counter.most_common(TOP_N_TICKERS) if t[0] == "STOCK"]
+        asset_quotes = session.query(AssetQuote).filter(AssetQuote.ticker.in_(top_keys)).all()
+    finally:
+        session.close()
+    source_tickers = [aq.source_ticker for aq in asset_quotes]
+    prices = StockDataSource.refresh_latest_prices(source_tickers)
+    now = datetime.datetime.now()
+    ds_name = "YFINANCE"
+    for st in source_tickers:
+        if st in prices:
+            latest_cache[(ds_name, st)] = (prices[st], now)
+    time.sleep(REQUEST_DELAY_SECONDS)
 
 def refresh_crypto_prices():
     prices = CryptoDataSource.get_all_latest_prices()
     now = datetime.datetime.now()
+    ds_name = "BINANCE"
     for ticker, price in prices.items():
-        latest_cache[("CRYPTO", ticker)] = (price, now)
+        latest_cache[(ds_name, ticker)] = (price, now)
 
 def refresh_all_latest_prices():
     refresh_stock_top_n_tickers()
@@ -790,6 +845,7 @@ def refresh_all_latest_prices():
     last_cache_refresh = datetime.datetime.now()
 
 # ---------- Query Counter Persistence ----------
+
 def load_query_counter():
     session = Session()
     try:
@@ -827,6 +883,7 @@ def save_query_counter():
         session.close()
 
 # ---------- Flask Application ----------
+
 app = Flask(__name__)
 api_stats = Counter()
 
@@ -841,7 +898,9 @@ def get_unified_ticker():
         if not asset_quote:
             return jsonify({"error": "Ticker not found"}), 404
         ohlcv_records = session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id).all()
-        data_source_name = asset_quote.data_source.name.upper() if asset_quote.data_source else "UNKNOWN"
+        # Use data source name and source_ticker for latest cache lookup.
+        ds_key = (asset_quote.data_source.name.upper() if asset_quote.data_source else "UNKNOWN", asset_quote.source_ticker)
+        cache_entry = latest_cache.get(ds_key, (None, None))
         unified_data = {
             "ticker": asset_quote.ticker,
             "source_ticker": asset_quote.source_ticker,
@@ -855,9 +914,8 @@ def get_unified_ticker():
                 "symbol": asset_quote.to_asset_symbol,
             },
             "latest_cache": {
-                "price": latest_cache.get((data_source_name, asset_quote.ticker), (None, None))[0],
-                "timestamp": latest_cache.get((data_source_name, asset_quote.ticker), (None, None))[1].isoformat()
-                              if latest_cache.get((data_source_name, asset_quote.ticker), (None, None))[1] else None
+                "price": cache_entry[0],
+                "timestamp": cache_entry[1].isoformat() if cache_entry[1] else None
             },
             "historical_data": [
                 {
@@ -932,8 +990,16 @@ def get_latest():
     if not ticker:
         return jsonify({"error": "Ticker parameter is required"}), 400
     result = get_latest_price(ticker, asset_type)
-    key = (asset_type, ticker)
-    timestamp = latest_cache.get(key, (None, datetime.datetime.now()))[1]
+    session = Session()
+    try:
+        asset_quote = session.query(AssetQuote).filter_by(ticker=ticker).first()
+        if asset_quote:
+            ds_key = (asset_quote.data_source.name.upper() if asset_quote.data_source else "UNKNOWN", asset_quote.source_ticker)
+        else:
+            ds_key = (None, None)
+    finally:
+        session.close()
+    timestamp = latest_cache.get(ds_key, (None, datetime.datetime.now()))[1]
     if isinstance(result, (int, float)):
         return jsonify({
             "ticker": ticker,
@@ -959,7 +1025,8 @@ def get_assets():
             {
                 "asset_type": asset.asset_type,
                 "symbol": asset.symbol,
-                "name": asset.name
+                "name": asset.name,
+                "source_asset_key": asset.source_asset_key
             }
             for asset in assets
         ]
@@ -1090,6 +1157,7 @@ def get_tickers():
         session.close()
 
 # ---------- Updated Force Sync Endpoints with Data Source Parameter ----------
+
 @app.route("/api/sync/full", methods=["POST"])
 def sync_full():
     data = request.get_json() or {}
@@ -1118,7 +1186,7 @@ def sync_full():
                     symbol = coin_data["symbol"].upper() + "USDT"
                     historical_data = fetch_binance_crypto_data(symbol, HISTORICAL_START_DATE, None)
                     if historical_data is not None:
-                        update_crypto_asset_and_quote([coin_data], {ticker: historical_data}, upsert=True)
+                        update_crypto_asset_and_quote([coin_data], {coin_data["id"]: historical_data}, upsert=True)
                         return jsonify({"message": f"Full sync for crypto ticker {ticker} completed using {data_source}."})
                     else:
                         return jsonify({"error": f"Failed to fetch historical data for crypto ticker {ticker}"}), 404
@@ -1167,7 +1235,7 @@ def sync_delta():
                     symbol = coin_data["symbol"].upper() + "USDT"
                     historical_data = fetch_binance_crypto_data(symbol, two_days_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
                     if historical_data is not None:
-                        update_crypto_asset_and_quote([coin_data], {ticker: historical_data}, upsert=True)
+                        update_crypto_asset_and_quote([coin_data], {coin_data["id"]: historical_data}, upsert=True)
                         return jsonify({"message": f"Delta sync for crypto ticker {ticker} completed using {data_source}."})
                     else:
                         return jsonify({"error": f"Failed to fetch delta historical data for crypto ticker {ticker}"}), 404
@@ -1191,6 +1259,7 @@ def dashboard():
     return render_template('dashboard.html')
 
 # ---------- Scheduler Setup ----------
+
 scheduler = BackgroundScheduler()
 scheduler.add_job(refresh_all_latest_prices, "interval", minutes=LATEST_CACHE_REFRESH_INTERVAL_MINUTES, id="cache_refresh")
 scheduler.add_job(delta_sync_stocks, "interval", days=DELTA_SYNC_INTERVAL_DAYS, id="delta_sync_stocks")

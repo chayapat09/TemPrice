@@ -211,7 +211,7 @@
       gap: 10px;
       align-items: center;
     }
-    select, button, input {
+    select, button {
       padding: 8px 12px;
       border-radius: 4px;
       border: 1px solid #d1d5db;
@@ -219,7 +219,7 @@
       font-size: 14px;
       cursor: pointer;
     }
-    select:focus, button:focus, input:focus {
+    select:focus, button:focus {
       outline: none;
       border-color: #2563eb;
       box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
@@ -427,7 +427,9 @@
               <div style="display: flex; height: 100%;">
                 <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 2rem;">
                   <h3>Stock Distribution by Region</h3>
-                  <div style="margin: 2rem 0;" id="region-distribution"></div>
+                  <div style="margin: 2rem 0;" id="region-distribution">
+                    <p>Region distribution data not available.</p>
+                  </div>
                 </div>
                 <div style="width: 250px; height: 250px; position: relative; align-self: center;" id="region-pie"></div>
               </div>
@@ -445,21 +447,14 @@
           </div>
         </div>
 
-        <!-- Force Sync for Ticker Section -->
         <div class="card">
           <div class="card-header">
             <h2>Force Sync for Ticker</h2>
           </div>
           <div style="margin-bottom: 1rem; position: relative;">
             <select id="sync-asset-type" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border);">
-              <option value="STOCK" selected>Stock</option>
+              <option value="STOCK">Stock</option>
               <option value="CRYPTO">Crypto</option>
-              <option value="CURRENCY">Currency</option>
-            </select>
-            <!-- New Data Source Selector -->
-            <select id="sync-data-source" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); margin-left: 0.5rem;">
-              <!-- Options will update based on asset type -->
-              <option value="YFINANCE" selected>yFinance</option>
             </select>
             <input type="text" id="sync-ticker-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px; margin-left: 0.5rem;">
             <div id="sync-ticker-suggestions" class="autocomplete-suggestions" style="display: none;"></div>
@@ -496,15 +491,14 @@
               <select id="asset-type-select" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border);">
                 <option value="STOCK" selected>Stock</option>
                 <option value="CRYPTO">Crypto</option>
-                <option value="CURRENCY">Currency</option>
               </select>
               <input type="text" id="ticker-search-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px;">
               <div id="ticker-search-suggestions" class="autocomplete-suggestions" style="display: none;"></div>
               <button class="button button-primary" id="ticker-search-btn" style="margin-left: 0.5rem;">Search</button>
             </div>
-            <div id="ticker-meta-preview" style="margin-bottom: 1rem; border: 1px solid #e2e8f0; padding: 1rem; border-radius: 0.25rem;">
+            <div id="meta-data-content" style="margin-bottom: 1rem; border: 1px solid #e2e8f0; padding: 1rem; border-radius: 0.25rem;">
               <h3>Ticker Details</h3>
-              <div id="meta-data-content">Loading ticker details...</div>
+              <div>Loading ticker details...</div>
             </div>
             <div class="chart-header">
               <h1 class="chart-title" id="chart-title">Price Chart</h1>
@@ -612,7 +606,7 @@
               </div>
               <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
                 <span>Delta Sync</span>
-                <span>Daily at 01:00</span>
+                <span>Daily</span>
               </div>
             </div>
             <div>
@@ -665,7 +659,7 @@
     </div>
   </div>
 
-  <!-- Chart.js and Luxon for chart rendering -->
+  <!-- Chart.js and Luxon Libraries -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/luxon/3.0.1/luxon.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-adapter-luxon/1.2.0/chartjs-adapter-luxon.min.js"></script>
@@ -697,7 +691,6 @@
     fetch('/api/stats')
       .then(response => response.json())
       .then(data => {
-        // Assuming total tickers as sum of records from assets table
         document.getElementById('total-tickers').textContent = data.total_assets;
         document.getElementById('db-size').textContent = data.db_size;
         document.getElementById('cache-hit-rate').textContent = data.cache_hit_rate;
@@ -719,14 +712,15 @@
 
         const regionDistribution = document.getElementById('region-distribution');
         regionDistribution.innerHTML = '';
-        // Assuming region_distribution exists in stats; adjust if necessary
-        if(data.region_distribution){
+        if (data.region_distribution) {
           for (const [region, info] of Object.entries(data.region_distribution)) {
             regionDistribution.innerHTML += `<div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
               <span>${region}</span>
               <span>${info.count} (${info.percentage.toFixed(1)}%)</span>
             </div><div class="progress"><div class="progress-bar" style="width: ${info.percentage}%;"></div></div>`;
           }
+        } else {
+          regionDistribution.innerHTML = '<p>Region distribution data not available.</p>';
         }
 
         const apiStats = document.getElementById('api-stats');
@@ -739,7 +733,7 @@
         }
       });
 
-    // Fuzzy search implementation with updated fuzzy parameter
+    // Fuzzy search with updated fuzzy parameter
     function setupAutocomplete(inputId, suggestionsId, assetTypeSelectorId) {
       const input = document.getElementById(inputId);
       const suggestions = document.getElementById(suggestionsId);
@@ -752,7 +746,6 @@
           suggestions.style.display = 'none';
           return;
         }
-        // Include the fuzzy parameter in the API call
         fetch(`/api/tickers?query=${encodeURIComponent(query)}&asset_type=${assetType}&fuzzy=true`)
           .then(response => response.json())
           .then(data => {
@@ -809,38 +802,14 @@
     setupAutocomplete('sync-ticker-input', 'sync-ticker-suggestions', 'sync-asset-type');
     setupAutocomplete('ticker-search-input', 'ticker-search-suggestions', 'asset-type-select');
 
-    // Update Data Source options based on Asset Type in Force Sync section
-    document.getElementById('sync-asset-type').addEventListener('change', function() {
-      const assetType = this.value;
-      const syncDataSourceSelect = document.getElementById('sync-data-source');
-      syncDataSourceSelect.innerHTML = '';
-      if(assetType.toUpperCase() === 'STOCK'){
-        const option = document.createElement('option');
-        option.value = 'YFINANCE';
-        option.text = 'yFinance';
-        syncDataSourceSelect.appendChild(option);
-      } else if(assetType.toUpperCase() === 'CRYPTO'){
-        const option = document.createElement('option');
-        option.value = 'BINANCE';
-        option.text = 'Binance';
-        syncDataSourceSelect.appendChild(option);
-      } else {
-        const option = document.createElement('option');
-        option.value = '';
-        option.text = 'N/A';
-        syncDataSourceSelect.appendChild(option);
-      }
-    });
-
     // Force Sync for Ticker
     document.getElementById('force-full-sync-btn').addEventListener('click', () => {
       const ticker = document.getElementById('sync-ticker-input').value;
       const assetType = document.getElementById('sync-asset-type').value;
-      const dataSource = document.getElementById('sync-data-source').value;
       fetch('/api/sync/full', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ticker: ticker, asset_type: assetType, data_source: dataSource})
+        body: JSON.stringify({ticker: ticker, asset_type: assetType})
       })
       .then(response => response.json())
       .then(data => {
@@ -852,11 +821,10 @@
     document.getElementById('force-delta-sync-btn').addEventListener('click', () => {
       const ticker = document.getElementById('sync-ticker-input').value;
       const assetType = document.getElementById('sync-asset-type').value;
-      const dataSource = document.getElementById('sync-data-source').value;
       fetch('/api/sync/delta', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ticker: ticker, asset_type: assetType, data_source: dataSource})
+        body: JSON.stringify({ticker: ticker, asset_type: assetType})
       })
       .then(response => response.json())
       .then(data => {
@@ -925,10 +893,32 @@
           return response.json();
         })
         .then(data => {
-          // Process and display unified data here...
-          // This section can be adjusted based on your exact unified data structure
-          document.getElementById('meta-data-content').innerHTML = JSON.stringify(data, null, 2);
-          // Additional chart and table update logic here...
+          // Build meta information using the new keys
+          let metaHtml = `
+            <p><strong>Ticker:</strong> ${data.ticker}</p>
+            <p><strong>Source Ticker:</strong> ${data.source_ticker}</p>
+            <p><strong>Data Source:</strong> ${data.data_source}</p>
+            <p><strong>Asset Type:</strong> ${data.from_asset.asset_type}</p>
+            <p><strong>Asset Symbol:</strong> ${data.from_asset.symbol}</p>
+            <p><strong>Quote Currency:</strong> ${data.to_asset.symbol}</p>
+            <p><strong>Latest Price (Cache):</strong> ${data.latest_cache.price} <small>at ${data.latest_cache.timestamp}</small></p>
+          `;
+          document.getElementById('meta-data-content').innerHTML = metaHtml;
+          document.getElementById('chart-title').textContent = `${data.ticker} Price Chart`;
+          fullData = data.historical_data.map((item, index, arr) => {
+            if (index > 0) {
+              const prevClose = arr[index - 1].close;
+              item.change = parseFloat(((item.close - prevClose) / prevClose * 100).toFixed(2));
+            } else {
+              item.change = 0;
+            }
+            return item;
+          });
+          fullData.sort((a, b) => new Date(a.date) - new Date(b.date));
+          applyTimeframe(30);
+          updateChart();
+          updateStats();
+          updateDataTable();
         })
         .catch(err => {
           document.getElementById('meta-data-content').innerHTML = `<p style="color: red;">${err.message}</p>`;
@@ -940,9 +930,13 @@
 
     function applyTimeframe(days) {
       const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - days);
-      const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
-      displayData = fullData.filter(item => item.date >= cutoffDateStr);
+      if (days !== 'all') {
+        cutoffDate.setDate(cutoffDate.getDate() - days);
+        const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
+        displayData = fullData.filter(item => item.date >= cutoffDateStr);
+      } else {
+        displayData = [...fullData];
+      }
     }
 
     function updateChart() {
@@ -1088,6 +1082,7 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+      // Load initial ticker data for default ticker
       fetchHistoricalData('AAPL', 'STOCK');
 
       document.getElementById('ticker-search-btn').addEventListener('click', () => {
