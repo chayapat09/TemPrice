@@ -7,6 +7,9 @@ from data_fetchers import fetch_yf_data_for_ticker, fetch_yf_data, fetch_coingec
 from utils import safe_convert
 from sqlalchemy.exc import SQLAlchemyError
 import logging
+from config import REGULAR_TTL
+
+from cache_storage import latest_cache  # Import from the new cache module
 
 logger = logging.getLogger(__name__)
 
@@ -493,10 +496,6 @@ def delta_sync_currency(ticker=None):
     else:
         logger.info("Global Delta Sync for Currencies Completed.")
 
-# Latest price cache and refresh functions
-latest_cache = {}
-last_cache_refresh = None
-
 def refresh_stock_top_n_tickers(query_counter, top_n, delay_t):
     session = Session()
     try:
@@ -511,7 +510,8 @@ def refresh_stock_top_n_tickers(query_counter, top_n, delay_t):
     ds_name = "YFINANCE"
     for st in source_tickers:
         if st in prices:
-            latest_cache[(ds_name, st)] = (prices[st], now)
+            expires = now + datetime.timedelta(minutes=REGULAR_TTL)
+            latest_cache[(ds_name, st)] = (prices[st], now, expires)
     time.sleep(delay_t)
 
 def refresh_crypto_prices():
@@ -520,7 +520,8 @@ def refresh_crypto_prices():
     now = datetime.datetime.now()
     ds_name = "BINANCE"
     for ticker, price in prices.items():
-        latest_cache[(ds_name, ticker)] = (price, now)
+        expires = now + datetime.timedelta(minutes=REGULAR_TTL)
+        latest_cache[(ds_name, ticker)] = (price, now, expires)
 
 def refresh_currency_prices():
     from data_fetchers import CurrencyDataSource
@@ -529,10 +530,11 @@ def refresh_currency_prices():
     codes = [code for code, name in currency_list]
     prices = CurrencyDataSource.refresh_latest_prices(codes)
     now = datetime.datetime.now()
-    ds_name = "AlphaVantage"
+    ds_name = "ALPHAVANTAGE"
     for code in codes:
         if code in prices:
-            latest_cache[(ds_name, code)] = (prices[code], now)
+            expires = now + datetime.timedelta(minutes=REGULAR_TTL)
+            latest_cache[(ds_name, code)] = (prices[code], now, expires)
 
 def refresh_all_latest_prices():
     from config import REQUEST_DELAY_SECONDS, TOP_N_TICKERS
@@ -540,5 +542,5 @@ def refresh_all_latest_prices():
     refresh_stock_top_n_tickers(query_counter, TOP_N_TICKERS, REQUEST_DELAY_SECONDS)
     refresh_crypto_prices()
     # refresh_currency_prices()
-    global last_cache_refresh
-    last_cache_refresh = datetime.datetime.now()
+    import cache_storage
+    cache_storage.last_cache_refresh = datetime.datetime.now()

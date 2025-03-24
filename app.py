@@ -5,11 +5,11 @@ import time
 from collections import Counter
 from apscheduler.schedulers.background import BackgroundScheduler
 from models import Session, AssetQuote, AssetOHLCV, DeltaSyncState, Asset, DerivedTicker
-from sync import full_sync_stocks, full_sync_crypto, delta_sync_stocks, delta_sync_crypto, full_sync_currency, delta_sync_currency, refresh_all_latest_prices, latest_cache, last_cache_refresh, refresh_currency_prices
+from sync import full_sync_stocks, full_sync_crypto, delta_sync_stocks, delta_sync_crypto, full_sync_currency, delta_sync_currency, refresh_all_latest_prices, refresh_currency_prices
+from cache_storage import latest_cache, last_cache_refresh
 from utils import load_query_counter, save_query_counter, query_counter, prepopulate_currency_assets
 import logging
 from data_fetchers import StockDataSource, CryptoDataSource, CurrencyDataSource
-
 import traceback
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ def get_unified_ticker():
         if asset_quote:
             ohlcv_records = session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id).all()
             ds_key = (asset_quote.data_source.name.upper() if asset_quote.data_source else "UNKNOWN", asset_quote.source_ticker)
-            cache_entry = latest_cache.get(ds_key, (None, None))
+            cache_entry = latest_cache.get(ds_key, (None, datetime.datetime.now(), None))
             unified_data = {
                 "ticker": asset_quote.ticker,
                 "source_ticker": asset_quote.source_ticker,
@@ -65,13 +65,11 @@ def get_unified_ticker():
             }
             return jsonify(unified_data)
         else:
-            # Check if ticker exists as a DerivedTicker
             from utils import extract_tickers, safe_eval_expr, get_historical_series, get_latest_price_for_asset
             derived = session.query(DerivedTicker).filter_by(name=ticker).first()
             if not derived:
                 return jsonify({"error": "Ticker not found"}), 404
             underlying_tickers = extract_tickers(derived.formula)
-            # Compute latest price
             context = {}
             for ut in underlying_tickers:
                 price = get_latest_price_for_asset(ut)
@@ -83,7 +81,6 @@ def get_unified_ticker():
             except Exception as e:
                 logger.error(f"Error evaluating derived formula: {e}\n{traceback.format_exc()}")
                 return jsonify({"error": f"Error evaluating formula: {str(e)}"}), 500
-            # Get historical series for each underlying ticker
             historical_series = {}
             for ut in underlying_tickers:
                 series = get_historical_series(ut)
@@ -166,6 +163,10 @@ def get_latest():
     asset_type = request.args.get("asset_type", "STOCK").upper()
     if not ticker:
         return jsonify({"error": "Ticker parameter is required"}), 400
+    # Update query counter for latest endpoint
+    from utils import query_counter
+    query_counter[(ticker, asset_type)] += 1
+
     if asset_type == "DERIVED":
         session = Session()
         try:
@@ -205,7 +206,7 @@ def get_latest():
                 ds_key = (None, None)
         finally:
             session.close()
-        timestamp = latest_cache.get(ds_key, (None, datetime.datetime.now()))[1]
+        timestamp = latest_cache.get(ds_key, (None, datetime.datetime.now(), None))[1]
         result = None
         if asset_type == "STOCK":
             result = StockDataSource.get_latest_price(asset_quote.source_ticker) if asset_quote else "NOT_FOUND"
@@ -231,6 +232,10 @@ def get_historical():
     asset_type = request.args.get("asset_type", "STOCK").upper()
     if not ticker:
         return jsonify({"error": "Ticker parameter is required"}), 400
+    # Update query counter for historical endpoint
+    from utils import query_counter
+    query_counter[(ticker, asset_type)] += 1
+
     if asset_type == "DERIVED":
         session = Session()
         try:

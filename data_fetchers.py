@@ -6,6 +6,8 @@ import yfinance as yf
 from decimal import Decimal
 from utils import safe_convert, chunk_list
 import logging
+from config import REGULAR_TTL, NOT_FOUND_TTL
+from cache_storage import latest_cache
 
 logger = logging.getLogger(__name__)
 
@@ -175,11 +177,26 @@ def fetch_binance_crypto_data(symbol, start_date, end_date):
 class StockDataSource:
     @staticmethod
     def get_latest_price(ticker):
+        ds_name = "YFINANCE"
+        now = datetime.datetime.now()
+        key = (ds_name, ticker)
+        if key in latest_cache:
+            price, timestamp, expires = latest_cache[key]
+            if now < expires:
+                return price
+            else:
+                del latest_cache[key]
         try:
             data = yf.Ticker(ticker)
-            return data.fast_info["last_price"]
+            price = data.fast_info["last_price"]
+            expires = now + datetime.timedelta(minutes=REGULAR_TTL)
+            latest_cache[key] = (price, now, expires)
+            return price
         except KeyError:
-            return "NOT_FOUND"
+            price = "NOT_FOUND"
+            expires = now + datetime.timedelta(minutes=NOT_FOUND_TTL)
+            latest_cache[key] = (price, now, expires)
+            return price
         except Exception as e:
             logger.error(f"Error fetching latest price for stock {ticker}: {e}")
             return None
@@ -209,7 +226,16 @@ class CryptoDataSource:
             response = requests.get(url)
             if response.status_code == 200:
                 data = response.json()
-                return { item["symbol"]: float(item["price"]) for item in data }
+                prices = {}
+                now = datetime.datetime.now()
+                for item in data:
+                    symbol = item["symbol"]
+                    price = float(item["price"])
+                    key = ("BINANCE", symbol)
+                    expires = now + datetime.timedelta(minutes=REGULAR_TTL)
+                    latest_cache[key] = (price, now, expires)
+                    prices[symbol] = price
+                return prices
             return {}
         except Exception as e:
             logger.error("Error fetching crypto prices: " + str(e))
@@ -217,14 +243,30 @@ class CryptoDataSource:
 
     @staticmethod
     def get_latest_price(ticker):
+        ds_name = "BINANCE"
+        now = datetime.datetime.now()
+        key = (ds_name, ticker)
+        if key in latest_cache:
+            price, timestamp, expires = latest_cache[key]
+            if now < expires:
+                return price
+            else:
+                del latest_cache[key]
         url = f"{CryptoDataSource.BASE_URL}/ticker/price"
         params = {"symbol": ticker}
         try:
             response = requests.get(url, params=params)
             if response.status_code == 200:
                 data = response.json()
-                return float(data["price"])
-            return "NOT_FOUND"
+                price = float(data["price"])
+                expires = now + datetime.timedelta(minutes=REGULAR_TTL)
+                latest_cache[key] = (price, now, expires)
+                return price
+            else:
+                price = "NOT_FOUND"
+                expires = now + datetime.timedelta(minutes=NOT_FOUND_TTL)
+                latest_cache[key] = (price, now, expires)
+                return "NOT_FOUND"
         except Exception as e:
             logger.error(f"Error fetching latest price for crypto {ticker}: {e}")
             return None
@@ -287,9 +329,30 @@ def fetch_fx_daily_data(from_currency, to_currency="USD", outputsize="compact"):
 class CurrencyDataSource:
     @staticmethod
     def get_latest_price(currency_code):
+        ds_name = "ALPHAVANTAGE"
+        now = datetime.datetime.now()
+        key = (ds_name, currency_code.upper())
+        if key in latest_cache:
+            price, timestamp, expires = latest_cache[key]
+            if now < expires:
+                return price
+            else:
+                del latest_cache[key]
         if currency_code.upper() == "USD":
-            return 1.0
-        return fetch_fx_realtime(currency_code, "USD")
+            price = 1.0
+            expires = now + datetime.timedelta(minutes=REGULAR_TTL)
+            latest_cache[key] = (price, now, expires)
+            return price
+        price = fetch_fx_realtime(currency_code, "USD")
+        if price is not None:
+            expires = now + datetime.timedelta(minutes=REGULAR_TTL)
+            latest_cache[key] = (price, now, expires)
+            return price
+        else:
+            price = "NOT_FOUND"
+            expires = now + datetime.timedelta(minutes=NOT_FOUND_TTL)
+            latest_cache[key] = (price, now, expires)
+            return "NOT_FOUND"
 
     @staticmethod
     def refresh_latest_prices(currency_codes):
