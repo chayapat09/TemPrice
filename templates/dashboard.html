@@ -912,7 +912,7 @@
                       `High: $${item.high.toFixed(2)}`,
                       `Low: $${item.low.toFixed(2)}`,
                       `Close: $${item.close.toFixed(2)}`,
-                      `Volume: ${item.volume.toLocaleString()}`
+                      `Volume: ${(item.volume ?? 0).toLocaleString()}`
                     ];
                   }
                 }
@@ -964,7 +964,7 @@
           <td>$${item.high.toFixed(2)}</td>
           <td>$${item.low.toFixed(2)}</td>
           <td>$${item.close.toFixed(2)}</td>
-          <td>${item.volume.toLocaleString()}</td>
+          <td>${(item.volume ?? 0).toLocaleString()}</td>
           <td class="${item.change >= 0 ? 'positive' : 'negative'}">${item.change}%</td>
         `;
         tableBody.appendChild(row);

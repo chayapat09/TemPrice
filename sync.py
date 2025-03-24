@@ -73,7 +73,7 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
             else:
                 asset_quote.source_ticker = ticker
 
-            if ticker in historical_data:
+            if ticker in historical_data and historical_data[ticker] is not None:
                 df = historical_data[ticker]
                 for date, row_data in df.iterrows():
                     price_date = date if isinstance(date, datetime.datetime) else datetime.datetime.combine(date, datetime.time())
@@ -166,7 +166,7 @@ def update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False):
             else:
                 asset_quote.source_ticker = composite_ticker
 
-            if coin_id in historical_data:
+            if coin_id in historical_data and historical_data[coin_id] is not None:
                 df = historical_data[coin_id]
                 for date, row_data in df.iterrows():
                     price_date = date if isinstance(date, datetime.datetime) else datetime.datetime.combine(date, datetime.time())
@@ -207,7 +207,7 @@ def update_currency_asset_and_quote(currency_list, historical_data, upsert=False
             session.commit()
 
         for currency_code, currency_name in currency_list:
-            asset = session.query(Asset).filter_by(asset_type="CURRENCY", symbol=currency_code).first()
+            asset = session.query(CurrencyAsset).filter_by(asset_type="CURRENCY", symbol=currency_code).first()
             if not asset:
                 asset = CurrencyAsset(asset_type="CURRENCY", symbol=currency_code, name=currency_name, source_asset_key=currency_code)
                 session.add(asset)
@@ -231,7 +231,7 @@ def update_currency_asset_and_quote(currency_list, historical_data, upsert=False
             else:
                 asset_quote.source_ticker = currency_code
 
-            if currency_code in historical_data and historical_data[currency_code] != None:
+            if currency_code in historical_data and historical_data[currency_code] is not None:
                 df = historical_data[currency_code]
                 for date, row_data in df.iterrows():
                     price_date = date if isinstance(date, datetime.datetime) else datetime.datetime.combine(date, datetime.time())
@@ -386,16 +386,24 @@ def delta_sync_crypto():
         session.close()
     logger.info("Global Delta Sync for Cryptocurrencies Completed.")
 
-def full_sync_currency():
+def full_sync_currency(ticker=None):
     from config import HISTORICAL_START_DATE, REQUEST_DELAY_SECONDS
-    logger.info("Starting Global Full Sync for Currencies...")
     from utils import get_currency_list
+    import pandas as pd
+    if ticker:
+        logger.info(f"Starting Full Sync for Currency: {ticker}...")
+    else:
+        logger.info("Starting Global Full Sync for Currencies...")
     currency_list = get_currency_list()
+    if ticker:
+        currency_list = [(code, name) for code, name in currency_list if code.upper() == ticker.upper()]
+        if not currency_list:
+            logger.error(f"Ticker {ticker} not found in currency list.")
+            raise ValueError("Ticker not found")
     historical_data = {}
     from data_fetchers import fetch_fx_daily_data
     for currency_code, _ in currency_list:
         if currency_code.upper() == "USD":
-            import pandas as pd
             df = pd.DataFrame({
                 "Open": [1.0],
                 "High": [1.0],
@@ -405,6 +413,8 @@ def full_sync_currency():
             historical_data[currency_code] = df
         else:
             df = fetch_fx_daily_data(currency_code, "USD", outputsize="full")
+            if df is None or df.empty:
+                logger.error(f"Failed to fetch FX daily data for {currency_code}/USD")
             historical_data[currency_code] = df
         time.sleep(REQUEST_DELAY_SECONDS)
     update_currency_asset_and_quote(currency_list, historical_data, upsert=False)
@@ -422,23 +432,34 @@ def full_sync_currency():
         raise
     finally:
         session.close()
-    logger.info("Global Full Sync for Currencies Completed.")
+    if ticker:
+        logger.info(f"Full Sync for Currency {ticker} Completed.")
+    else:
+        logger.info("Global Full Sync for Currencies Completed.")
 
-def delta_sync_currency():
+def delta_sync_currency(ticker=None):
     from config import REQUEST_DELAY_SECONDS
-    logger.info("Starting Global Delta Sync for Currencies...")
+    from utils import get_currency_list
+    import pandas as pd
+    if ticker:
+        logger.info(f"Starting Delta Sync for Currency: {ticker}...")
+    else:
+        logger.info("Starting Global Delta Sync for Currencies...")
     session = Session()
     state = session.query(DeltaSyncState).filter_by(id=1).first()
     session.close()
     today = datetime.datetime.now().date()
     two_days_ago = today - datetime.timedelta(days=2)
-    from utils import get_currency_list
     currency_list = get_currency_list()
+    if ticker:
+        currency_list = [(code, name) for code, name in currency_list if code.upper() == ticker.upper()]
+        if not currency_list:
+            logger.error(f"Ticker {ticker} not found in currency list.")
+            raise ValueError("Ticker not found")
     historical_data = {}
     from data_fetchers import fetch_fx_daily_data
     for currency_code, _ in currency_list:
         if currency_code.upper() == "USD":
-            import pandas as pd
             df = pd.DataFrame({
                 "Open": [1.0],
                 "High": [1.0],
@@ -448,6 +469,8 @@ def delta_sync_currency():
             historical_data[currency_code] = df
         else:
             df = fetch_fx_daily_data(currency_code, "USD", outputsize="full")
+            if df is None or df.empty:
+                logger.error(f"Failed to fetch FX daily data for {currency_code}/USD")
             historical_data[currency_code] = df
         time.sleep(REQUEST_DELAY_SECONDS)
     update_currency_asset_and_quote(currency_list, historical_data, upsert=True)
@@ -465,7 +488,10 @@ def delta_sync_currency():
         raise
     finally:
         session.close()
-    logger.info("Global Delta Sync for Currencies Completed.")
+    if ticker:
+        logger.info(f"Delta Sync for Currency {ticker} Completed.")
+    else:
+        logger.info("Global Delta Sync for Currencies Completed.")
 
 # Latest price cache and refresh functions
 latest_cache = {}

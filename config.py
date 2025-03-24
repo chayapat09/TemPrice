@@ -19,7 +19,7 @@ QUERY_COUNTER_SAVE_INTERVAL_MINUTES = 5
 DELTA_SYNC_INTERVAL_DAYS = 1
 
 # AlphaVantage API Key for Currency Data (replace with your own key)
-ALPHAVANTAGE_API_KEY = "DB7QO6ZGF7BMMJCD"
+ALPHAVANTAGE_API_KEY = "JVK9DJKA9HTU74LI"
 
 # Ensure the 'instance' directory exists
 if not os.path.exists('instance'):

@@ -336,7 +336,7 @@ def sync_full():
                 if data_source.upper() != "ALPHAVANTAGE":
                     return jsonify({"error": "Invalid data source for CURRENCY. Supported: AlphaVantage"}), 400
                 from sync import full_sync_currency
-                full_sync_currency()
+                full_sync_currency(ticker=ticker)
                 return jsonify({"message": f"Full sync for currency ticker {ticker} completed using {data_source}."})
             else:
                 return jsonify({"error": "Invalid asset_type"}), 400
@@ -406,7 +406,7 @@ def sync_delta():
                 if data_source.upper() != "ALPHAVANTAGE":
                     return jsonify({"error": "Invalid data source for CURRENCY. Supported: AlphaVantage"}), 400
                 from sync import delta_sync_currency
-                delta_sync_currency()
+                delta_sync_currency(ticker=ticker)
                 return jsonify({"message": f"Delta sync for currencies completed using {data_source}."})
             else:
                 return jsonify({"error": "Invalid asset_type"}), 400
