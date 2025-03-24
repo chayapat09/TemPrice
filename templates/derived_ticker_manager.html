@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Derived Ticker Manager</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #f1f5f9;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .container {
+      width: 100%;
+      max-width: 600px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    .header {
+      background: #f8fafc;
+      padding: 20px;
+      border-bottom: 1px solid #e2e8f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .close-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: #f1f5f9;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .close-btn:hover {
+      background: #e2e8f0;
+    }
+    .body {
+      padding: 20px;
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    .form-label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #334155;
+    }
+    .form-control {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .form-control:focus {
+      outline: none;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+    }
+    .search-box {
+      position: relative;
+      margin-bottom: 8px;
+    }
+    .search-box input {
+      width: 100%;
+      padding: 6px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .search-box input:focus {
+      outline: none;
+      border-color: #3b82f6;
+    }
+    .formula-builder {
+      display: flex;
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      padding: 15px;
+      gap: 15px;
+      height: 250px;
+    }
+    .builder-section {
+      flex: 1;
+      background: white;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .section-header {
+      padding: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #64748b;
+      background: #f8fafc;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .section-content {
+      flex: 1;
+      padding: 8px;
+      overflow-y: auto;
+    }
+    .ticker-item, .operator-item, .constant-item {
+      margin-bottom: 5px;
+      padding: 6px 10px;
+      background: #f1f5f9;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .ticker-item:hover, .operator-item:hover, .constant-item:hover {
+      background: #e2e8f0;
+    }
+    .operator-item {
+      display: inline-block;
+      width: calc(50% - 5px);
+      text-align: center;
+      margin-right: 5px;
+      margin-bottom: 10px;
+      height: 40px;
+      line-height: 28px;
+      font-size: 16px;
+    }
+    .operator-item:nth-child(even) {
+      margin-right: 0;
+    }
+    .selected {
+      background: #3b82f6 !important;
+      color: white;
+    }
+    .formula-preview {
+      position: relative;
+      background: white;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      padding: 10px;
+      min-height: 42px;
+      margin-top: 5px;
+      color: #334155;
+      display: flex;
+      align-items: center;
+    }
+    .formula-tokens {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      align-items: center;
+    }
+    .formula-token {
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 4px;
+      padding: 5px 10px;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+    }
+    .token-close {
+      margin-left: 8px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #cbd5e1;
+      color: #64748b;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .token-close:hover {
+      background: #94a3b8;
+      color: white;
+    }
+    .token-ticker {
+      background: #dbeafe;
+      border-color: #bfdbfe;
+    }
+    .token-operator {
+      background: #e0f2fe;
+      border-color: #bae6fd;
+    }
+    .token-constant {
+      background: #f0fdf4;
+      border-color: #dcfce7;
+    }
+    .clear-all {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      color: #64748b;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .clear-all:hover {
+      background: #e2e8f0;
+    }
+    .formula-validation {
+      margin-top: 5px;
+      height: 20px;
+      color: #10b981;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+    }
+    .formula-validation.error {
+      color: #ef4444;
+    }
+    .validation-icon {
+      margin-right: 5px;
+    }
+    .preview-result {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      padding: 15px;
+      margin-top: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .result-label {
+      font-weight: 600;
+      color: #334155;
+    }
+    .result-value {
+      font-size: 18px;
+      font-weight: 600;
+      color: #334155;
+    }
+    .footer {
+      padding: 15px 20px;
+      text-align: right;
+      border-top: 1px solid #e2e8f0;
+      background: #f8fafc;
+    }
+    .btn {
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+    .btn-default {
+      background: white;
+      border: 1px solid #cbd5e1;
+      color: #64748b;
+      margin-right: 10px;
+    }
+    .btn-default:hover {
+      background: #f1f5f9;
+    }
+    .btn-primary {
+      background: #3b82f6;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #2563eb;
+    }
+    .derived-list {
+      margin-top: 20px;
+    }
+    .derived-item {
+      padding: 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .derived-item button {
+      margin-left: 5px;
+    }
+    .notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #10b981;
+      color: white;
+      padding: 12px 20px;
+      border-radius: 4px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      display: none;
+      animation: slideIn 0.3s ease;
+    }
+    @keyframes slideIn {
+      from {
+        transform: translateY(-20px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h2 style="margin: 0; font-size: 18px; color: #334155;">Create New Derived Ticker</h2>
+    <div class="close-btn" onclick="window.location.href='/'">✕</div>
+  </div>
+  
+  <div class="body">
+    <div class="form-group">
+      <label class="form-label">Ticker Name</label>
+      <input type="text" class="form-control" placeholder="Enter a unique name..." id="tickerName">
+    </div>
+    
+    <div class="form-group">
+      <label class="form-label">Formula Builder</label>
+      <div class="formula-builder">
+        <div class="builder-section">
+          <div class="section-header">Available Tickers</div>
+          <div class="section-content" id="availableTickerContainer">
+            <div class="search-box">
+              <input type="text" placeholder="Search tickers..." id="tickerSearch">
+            </div>
+            <div id="tickerList">
+              <!-- Ticker items loaded dynamically from /api/tickers -->
+            </div>
+          </div>
+        </div>
+        
+        <div class="builder-section">
+          <div class="section-header">Operators</div>
+          <div class="section-content">
+            <div class="operator-item" data-value="+">+</div>
+            <div class="operator-item" data-value="-">-</div>
+            <div class="operator-item" data-value="*">×</div>
+            <div class="operator-item" data-value="/">/</div>
+            <div class="operator-item" style="width: 100%;" data-value="(">(</div>
+            <div class="operator-item" style="width: 100%;" data-value=")">)</div>
+          </div>
+        </div>
+        
+        <div class="builder-section">
+          <div class="section-header">Constants</div>
+          <div class="section-content">
+            <div class="constant-item" data-value="2">2</div>
+            <div class="constant-item" data-value="0.5">0.5</div>
+            <div class="constant-item" data-value="100">100</div>
+            <div class="constant-item" data-value="1000">1000</div>
+            <div class="ticker-item" style="background: #dbeafe; color: #3b82f6;" id="customValueBtn">Add Custom Value</div>
+          </div>
+        </div>
+      </div>
+      
+      <label class="form-label" style="margin-top: 15px;">Formula Preview</label>
+      <div class="formula-preview">
+        <div class="formula-tokens" id="formulaTokens">
+          <!-- Tokens will be added here -->
+        </div>
+        <div class="clear-all" id="clearAll">Clear All</div>
+      </div>
+      
+      <div class="formula-validation" id="validation">
+        <!-- Validation message will appear here -->
+      </div>
+    </div>
+    
+    <div class="preview-result">
+      <span class="result-label">Current Result:</span>
+      <span class="result-value" id="resultValue">–</span>
+    </div>
+    
+    <div style="margin-top: 20px;">
+      <button class="btn btn-primary" id="createBtn">Create Derived Ticker</button>
+    </div>
+    
+    <div class="derived-list" id="derivedTickerList">
+      <!-- List of existing derived tickers will be displayed here -->
+    </div>
+  </div>
+  
+  <div class="footer">
+    <button class="btn btn-default" onclick="window.location.href='/'">Cancel</button>
+  </div>
+</div>
+
+<div class="notification" id="notification">
+  Ticker created successfully!
+</div>
+
+<script>
+  // Global variable to store available tickers loaded from the tickers endpoint
+  let availableTickers = [];
+  // Array to store the current formula parts
+  let formula = [];
+
+  // Load available tickers from the /api/tickers endpoint with a wildcard query ("%25")
+  function loadAvailableTickers() {
+    fetch('/api/tickers?query=%25&limit=1000')
+      .then(response => response.json())
+      .then(data => {
+        // Expecting an array of objects with a "ticker" property
+        availableTickers = data.map(item => item.ticker);
+        renderTickerList();
+      })
+      .catch(err => {
+        console.error("Error loading available tickers:", err);
+      });
+  }
+
+  // Render the ticker list inside the tickerList div
+  function renderTickerList() {
+    const tickerListDiv = document.getElementById('tickerList');
+    tickerListDiv.innerHTML = '';
+    availableTickers.forEach(ticker => {
+      const div = document.createElement('div');
+      div.className = 'ticker-item';
+      div.setAttribute('data-value', ticker);
+      div.textContent = ticker;
+      div.addEventListener('click', () => {
+        addItemToFormula(ticker, 'ticker');
+        div.classList.add('selected');
+        setTimeout(() => div.classList.remove('selected'), 200);
+      });
+      tickerListDiv.appendChild(div);
+    });
+  }
+
+  // Filter ticker list based on search input
+  document.getElementById('tickerSearch').addEventListener('input', function() {
+    const query = this.value.toLowerCase();
+    const items = document.querySelectorAll('#tickerList .ticker-item');
+    items.forEach(item => {
+      if (item.textContent.toLowerCase().includes(query)) {
+        item.style.display = 'block';
+      } else {
+        item.style.display = 'none';
+      }
+    });
+  });
+
+  // Add an item to the formula
+  function addItemToFormula(value, type) {
+    formula.push(value);
+    updateFormulaPreview();
+    validateFormula();
+    calculateResult();
+  }
+  
+  // Update the formula preview by rendering tokens
+  function updateFormulaPreview() {
+    const formulaTokens = document.getElementById('formulaTokens');
+    formulaTokens.innerHTML = '';
+    formula.forEach((item, index) => {
+      const token = document.createElement('div');
+      let tokenType = '';
+      if (['+', '-', '*', '/', '(', ')'].includes(item)) {
+        tokenType = 'token-operator';
+      } else if (!isNaN(parseFloat(item))) {
+        tokenType = 'token-constant';
+      } else {
+        tokenType = 'token-ticker';
+      }
+      token.className = `formula-token ${tokenType}`;
+      token.innerHTML = `${item} <div class="token-close" data-index="${index}">×</div>`;
+      formulaTokens.appendChild(token);
+    });
+    document.querySelectorAll('.token-close').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const idx = parseInt(this.getAttribute('data-index'));
+        removeFormulaItem(idx);
+      });
+    });
+  }
+  
+  // Remove an item from the formula
+  function removeFormulaItem(index) {
+    formula.splice(index, 1);
+    updateFormulaPreview();
+    validateFormula();
+    calculateResult();
+  }
+  
+  // Clear the entire formula
+  function clearFormula() {
+    formula = [];
+    updateFormulaPreview();
+    validateFormula();
+    calculateResult();
+  }
+  
+  document.getElementById('clearAll').addEventListener('click', clearFormula);
+  
+  // Simple validation check for the formula
+  function validateFormula() {
+    const validation = document.getElementById('validation');
+    if (formula.length === 0) {
+      validation.innerHTML = '';
+      return;
+    }
+    const hasOperator = formula.some(item => ['+', '-', '*', '/'].includes(item));
+    const hasTickers = formula.some(item => availableTickers.includes(item));
+    if (hasOperator && hasTickers) {
+      validation.innerHTML = '<span class="validation-icon">✓</span> Formula is valid';
+      validation.classList.remove('error');
+    } else {
+      validation.innerHTML = '<span class="validation-icon">⚠</span> Formula needs more components';
+      validation.classList.add('error');
+    }
+  }
+  
+  // Calculate a preview result (placeholder text)
+  function calculateResult() {
+    const resultValue = document.getElementById('resultValue');
+    if (formula.length < 3 || document.getElementById('validation').classList.contains('error')) {
+      resultValue.textContent = '–';
+      return;
+    }
+    resultValue.textContent = 'Calculated Preview';
+  }
+  
+  // Attach event listener for custom value button
+  document.getElementById('customValueBtn').addEventListener('click', () => {
+    const value = prompt("Enter a numerical value:");
+    if (value && !isNaN(parseFloat(value))) {
+      addItemToFormula(value, 'constant');
+    }
+  });
+  
+  // Attach event listeners for operator items
+  function attachOperatorListeners() {
+    document.querySelectorAll('.operator-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const value = item.getAttribute('data-value');
+        addItemToFormula(value, 'operator');
+        item.classList.add('selected');
+        setTimeout(() => item.classList.remove('selected'), 200);
+      });
+    });
+  }
+  
+  // Attach event listeners for constant items
+  function attachConstantListeners() {
+    document.querySelectorAll('.constant-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const value = item.getAttribute('data-value');
+        addItemToFormula(value, 'constant');
+        item.classList.add('selected');
+        setTimeout(() => item.classList.remove('selected'), 200);
+      });
+    });
+  }
+  
+  // Create Derived Ticker via API
+  document.getElementById('createBtn').addEventListener('click', () => {
+    const tickerName = document.getElementById('tickerName').value.trim();
+    if (tickerName === '') {
+      alert('Please enter a ticker name');
+      return;
+    }
+    if (formula.length < 3 || document.getElementById('validation').classList.contains('error')) {
+      alert('Please create a valid formula');
+      return;
+    }
+    const data = {
+      name: tickerName,
+      formula: formula.join(' ')
+    };
+    fetch('/api/derived', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+      showNotification(result.message || result.error);
+      loadDerivedTickers();
+    })
+    .catch(err => {
+      alert('Error: ' + err);
+    });
+  });
+  
+  // Load existing derived tickers from API
+  function loadDerivedTickers() {
+    fetch('/api/derived')
+      .then(response => response.json())
+      .then(data => {
+        const list = document.getElementById('derivedTickerList');
+        list.innerHTML = '<h3>Existing Derived Tickers</h3>';
+        data.forEach(item => {
+          const div = document.createElement('div');
+          div.className = 'derived-item';
+          div.innerHTML = `<span>${item.name}: ${item.formula}</span>
+            <button onclick="deleteTicker('${item.name}')">Delete</button>`;
+          list.appendChild(div);
+        });
+      });
+  }
+  
+  // Delete derived ticker via API
+  function deleteTicker(name) {
+    if (!confirm(`Delete derived ticker ${name}?`)) return;
+    fetch('/api/derived/' + name, { method: 'DELETE' })
+      .then(response => response.json())
+      .then(result => {
+        showNotification(result.message || result.error);
+        loadDerivedTickers();
+      });
+  }
+  
+  // Show notification message
+  function showNotification(msg) {
+    const notification = document.getElementById('notification');
+    notification.textContent = msg;
+    notification.style.display = 'block';
+    setTimeout(() => {
+      notification.style.display = 'none';
+    }, 3000);
+  }
+  
+  // Initialize after DOM content is loaded
+  window.addEventListener('DOMContentLoaded', () => {
+    loadAvailableTickers();
+    loadDerivedTickers();
+    attachOperatorListeners();
+    attachConstantListeners();
+  });
+</script>
+</body>
+</html>
