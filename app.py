@@ -10,6 +10,7 @@ from cache_storage import latest_cache, last_cache_refresh
 from utils import load_query_counter, save_query_counter, query_counter, prepopulate_currency_assets
 import logging
 from data_fetchers import StockDataSource, CryptoDataSource, CurrencyDataSource
+from derived_datasource import DerivedDataSource
 import traceback
 
 logger = logging.getLogger(__name__)
@@ -65,47 +66,29 @@ def get_unified_ticker():
             }
             return jsonify(unified_data)
         else:
-            from utils import extract_tickers, safe_eval_expr, get_historical_series, get_latest_price_for_asset
-            derived = session.query(DerivedTicker).filter_by(name=ticker).first()
+            # Use DerivedDataSource for derived tickers.
+            derived = session.query(DerivedTicker).filter_by(ticker=ticker).first()
             if not derived:
                 return jsonify({"error": "Ticker not found"}), 404
-            underlying_tickers = extract_tickers(derived.formula)
-            context = {}
-            for ut in underlying_tickers:
-                price = get_latest_price_for_asset(ut)
-                if price in [None, "NOT_FOUND"]:
-                    return jsonify({"error": f"Latest price for underlying ticker {ut} not found"}), 404
-                context[ut] = price
             try:
-                latest_price = safe_eval_expr(derived.formula, context)
+                latest_price = DerivedDataSource.get_latest_price(ticker)
             except Exception as e:
                 logger.error(f"Error evaluating derived formula: {e}\n{traceback.format_exc()}")
                 return jsonify({"error": f"Error evaluating formula: {str(e)}"}), 500
-            historical_series = {}
-            for ut in underlying_tickers:
-                series = get_historical_series(ut)
-                if series:
-                    historical_series[ut] = series
-            historical_data = []
-            if historical_series:
-                common_dates = set.intersection(*(set(data.keys()) for data in historical_series.values()))
-                common_dates = sorted(common_dates)
-                for d in common_dates:
-                    context_day = {ut: historical_series[ut][d] for ut in underlying_tickers}
-                    try:
-                        value = safe_eval_expr(derived.formula, context_day)
-                    except Exception as e:
-                        value = None
-                    historical_data.append({
-                        "date": d.isoformat(),
-                        "derived_value": value
-                    })
+            try:
+                historical_series = DerivedDataSource.get_historical_data(ticker)
+            except Exception as e:
+                logger.error(f"Error fetching historical data for derived ticker: {e}")
+                historical_series = {}
+            historical_data = [
+                {"date": d.isoformat(), "derived_value": value}
+                for d, value in historical_series.items()
+            ]
             unified_data = {
-                "ticker": derived.name,
+                "ticker": derived.ticker,
                 "formula": derived.formula,
                 "asset_type": "DERIVED",
                 "latest_price": latest_price,
-                "latest_context": context,
                 "historical_data": historical_data
             }
             return jsonify(unified_data)
@@ -170,21 +153,13 @@ def get_latest():
     if asset_type == "DERIVED":
         session = Session()
         try:
-            from utils import extract_tickers, safe_eval_expr, get_latest_price_for_asset
-            derived = session.query(DerivedTicker).filter_by(name=ticker).first()
+            derived = session.query(DerivedTicker).filter_by(ticker=ticker).first()
         finally:
             session.close()
         if not derived:
             return jsonify({"error": "Derived ticker not found"}), 404
-        underlying_tickers = extract_tickers(derived.formula)
-        context = {}
-        for ut in underlying_tickers:
-            price = get_latest_price_for_asset(ut)
-            if price in [None, "NOT_FOUND"]:
-                return jsonify({"error": f"Latest price for underlying ticker {ut} not found"}), 404
-            context[ut] = price
         try:
-            result = safe_eval_expr(derived.formula, context)
+            result = DerivedDataSource.get_latest_price(ticker)
         except Exception as e:
             return jsonify({"error": f"Error evaluating formula: {str(e)}"}), 500
         now = datetime.datetime.now()
@@ -193,7 +168,6 @@ def get_latest():
             "asset_type": "DERIVED",
             "price": result,
             "formula": derived.formula,
-            "context": context,
             "timestamp": now.isoformat()
         })
     else:
@@ -239,33 +213,17 @@ def get_historical():
     if asset_type == "DERIVED":
         session = Session()
         try:
-            from utils import extract_tickers, safe_eval_expr, get_historical_series
-            derived = session.query(DerivedTicker).filter_by(name=ticker).first()
+            derived = session.query(DerivedTicker).filter_by(ticker=ticker).first()
         finally:
             session.close()
         if not derived:
             return jsonify({"error": "Derived ticker not found"}), 404
-        underlying_tickers = extract_tickers(derived.formula)
-        historical_data_dict = {}
-        for ut in underlying_tickers:
-            series = get_historical_series(ut)
-            if not series:
-                return jsonify({"error": f"Historical data for underlying ticker {ut} not found"}), 404
-            historical_data_dict[ut] = series
-        common_dates = set.intersection(*(set(data.keys()) for data in historical_data_dict.values()))
-        common_dates = sorted(common_dates)
-        derived_historical = []
-        for d in common_dates:
-            context = {ut: historical_data_dict[ut][d] for ut in underlying_tickers}
-            try:
-                value = safe_eval_expr(derived.formula, context)
-            except Exception as e:
-                continue
-            derived_historical.append({
-                "date": d.isoformat(),
-                "derived_value": value
-            })
-        return jsonify({"ticker": ticker, "asset_type": "DERIVED", "formula": derived.formula, "historical_data": derived_historical})
+        try:
+            historical_series = DerivedDataSource.get_historical_data(ticker)
+        except Exception as e:
+            return jsonify({"error": f"Error evaluating derived historical data: {str(e)}"}), 500
+        historical_data = [{"date": d.isoformat(), "derived_value": value} for d, value in historical_series.items()]
+        return jsonify({"ticker": ticker, "asset_type": "DERIVED", "formula": derived.formula, "historical_data": historical_data})
     else:
         session = Session()
         try:
@@ -315,7 +273,6 @@ def get_assets():
         return jsonify({"error": "Database error"}), 500
     finally:
         session.close()
-
 
 @app.route("/api/stats")
 def get_stats():
@@ -382,13 +339,13 @@ def get_tickers():
             if asset_type == "DERIVED":
                 # Query only DerivedTicker records
                 dt_query = session.query(DerivedTicker).filter(
-                    DerivedTicker.name.ilike(f"%{query}%")
+                    DerivedTicker.ticker.ilike(f"%{query}%")
                 )
                 if fuzzy_enabled:
                     candidate_results = dt_query.limit(50).all()
                     scored_results = []
                     for record in candidate_results:
-                        score = fuzz.token_set_ratio(query, record.name.lower())
+                        score = fuzz.token_set_ratio(query, record.ticker.lower())
                         scored_results.append((score, record))
                     scored_results.sort(key=lambda x: x[0], reverse=True)
                     final_results = [record for _, record in scored_results][offset: offset + limit]
@@ -423,7 +380,7 @@ def get_tickers():
                 (AssetQuote.source_ticker.ilike(f"%{query}%"))
             )
             dt_query = session.query(DerivedTicker).filter(
-                DerivedTicker.name.ilike(f"%{query}%")
+                DerivedTicker.ticker.ilike(f"%{query}%")
             )
             if fuzzy_enabled:
                 candidate_aq = aq_query.limit(50).all()
@@ -436,7 +393,7 @@ def get_tickers():
                     )
                     scored_results.append((score, record))
                 for record in candidate_dt:
-                    score = fuzz.token_set_ratio(query, record.name.lower())
+                    score = fuzz.token_set_ratio(query, record.ticker.lower())
                     scored_results.append((score, record))
                 scored_results.sort(key=lambda x: x[0], reverse=True)
                 combined_results = [record for _, record in scored_results]
@@ -446,21 +403,21 @@ def get_tickers():
                 results_dt = dt_query.all()
                 # Optionally, sort combined results alphabetically by ticker/name
                 combined_results = results_aq + results_dt
-                combined_results.sort(key=lambda r: r.ticker.lower() if hasattr(r, "ticker") else r.name.lower())
+                combined_results.sort(key=lambda r: r.ticker.lower() if hasattr(r, "ticker") else r.ticker.lower())
                 final_results = combined_results[offset: offset + limit]
 
         # Build a uniform response
         response = []
         for record in final_results:
-            if isinstance(record, AssetQuote):
+            if hasattr(record, "source_ticker") and record.source_ticker is not None:
                 response.append({
                     "ticker": record.ticker,
                     "source_ticker": record.source_ticker,
                     "asset_type": record.from_asset_type
                 })
-            elif isinstance(record, DerivedTicker):
+            else:
                 response.append({
-                    "ticker": record.name,
+                    "ticker": record.ticker,
                     "source_ticker": "",
                     "asset_type": "DERIVED",
                     "formula": record.formula
@@ -609,13 +566,13 @@ def sync_delta():
         logger.error(f"Error in delta sync: {e}")
         return jsonify({"error": str(e)}), 500
 
-# New endpoints for managing Derived Tickers
+# --- Endpoints for managing Derived Tickers ---
 @app.route("/api/derived", methods=["GET"])
 def list_derived_tickers():
     session = Session()
     try:
         tickers = session.query(DerivedTicker).all()
-        data = [{"name": dt.name, "formula": dt.formula} for dt in tickers]
+        data = [{"ticker": dt.ticker, "formula": dt.formula} for dt in tickers]
         return jsonify(data)
     except Exception as e:
         logger.error(f"Error listing derived tickers: {e}")
@@ -626,19 +583,19 @@ def list_derived_tickers():
 @app.route("/api/derived", methods=["POST"])
 def create_derived_ticker():
     data = request.get_json() or {}
-    name = data.get("name")
+    ticker = data.get("ticker")
     formula = data.get("formula")
-    if not name or not formula:
-        return jsonify({"error": "Name and formula are required"}), 400
+    if not ticker or not formula:
+        return jsonify({"error": "Ticker and formula are required"}), 400
     session = Session()
     try:
-        exists = session.query(DerivedTicker).filter_by(name=name).first()
+        exists = session.query(DerivedTicker).filter_by(ticker=ticker).first()
         if exists:
-            return jsonify({"error": "Derived ticker with this name already exists"}), 400
-        dt = DerivedTicker(name=name, formula=formula)
+            return jsonify({"error": "Derived ticker with this ticker already exists"}), 400
+        dt = DerivedTicker(ticker=ticker, formula=formula)
         session.add(dt)
         session.commit()
-        return jsonify({"message": f"Derived ticker {name} created successfully."})
+        return jsonify({"message": f"Derived ticker {ticker} created successfully."})
     except Exception as e:
         session.rollback()
         logger.error(f"Error creating derived ticker: {e}")
@@ -646,20 +603,20 @@ def create_derived_ticker():
     finally:
         session.close()
 
-@app.route("/api/derived/<name>", methods=["PUT"])
-def update_derived_ticker(name):
+@app.route("/api/derived/<ticker>", methods=["PUT"])
+def update_derived_ticker(ticker):
     data = request.get_json() or {}
     formula = data.get("formula")
     if not formula:
         return jsonify({"error": "Formula is required"}), 400
     session = Session()
     try:
-        dt = session.query(DerivedTicker).filter_by(name=name).first()
+        dt = session.query(DerivedTicker).filter_by(ticker=ticker).first()
         if not dt:
             return jsonify({"error": "Derived ticker not found"}), 404
         dt.formula = formula
         session.commit()
-        return jsonify({"message": f"Derived ticker {name} updated successfully."})
+        return jsonify({"message": f"Derived ticker {ticker} updated successfully."})
     except Exception as e:
         session.rollback()
         logger.error(f"Error updating derived ticker: {e}")
@@ -667,16 +624,16 @@ def update_derived_ticker(name):
     finally:
         session.close()
 
-@app.route("/api/derived/<name>", methods=["DELETE"])
-def delete_derived_ticker(name):
+@app.route("/api/derived/<ticker>", methods=["DELETE"])
+def delete_derived_ticker(ticker):
     session = Session()
     try:
-        dt = session.query(DerivedTicker).filter_by(name=name).first()
+        dt = session.query(DerivedTicker).filter_by(ticker=ticker).first()
         if not dt:
             return jsonify({"error": "Derived ticker not found"}), 404
         session.delete(dt)
         session.commit()
-        return jsonify({"message": f"Derived ticker {name} deleted successfully."})
+        return jsonify({"message": f"Derived ticker {ticker} deleted successfully."})
     except Exception as e:
         session.rollback()
         logger.error(f"Error deleting derived ticker: {e}")
@@ -687,6 +644,7 @@ def delete_derived_ticker(name):
 @app.route("/derived_ticker_manager")
 def derived_ticker_manager():
     return render_template('derived_ticker_manager.html')
+
 @app.route("/dashboard")
 def dashboard():
     return render_template('dashboard.html')

@@ -112,10 +112,10 @@ class QueryCount(Base):
     asset_type = Column(String(10), primary_key=True)
     count = Column(Integer, default=0)
 
-# New model for Derived Tickers
+# --- Updated Derived Ticker Model ---
 class DerivedTicker(Base):
     __tablename__ = "derived_tickers"
-    name = Column(String(50), primary_key=True)  # Unique derived ticker name
+    ticker = Column(String(50), primary_key=True)  # Unique derived ticker identifier (renamed from "name")
     formula = Column(String(255), nullable=False)
 
 engine = create_engine(DATABASE_URL, echo=False)
