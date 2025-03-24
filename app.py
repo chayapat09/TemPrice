@@ -370,29 +370,96 @@ def get_tickers():
     session = Session()
     try:
         from rapidfuzz import fuzz
-        base_query = session.query(AssetQuote)
+        final_results = []
+
         if asset_type:
-            base_query = base_query.filter(AssetQuote.from_asset_type == asset_type.upper())
-        base_query = base_query.filter(
-            (AssetQuote.ticker.ilike(f"%{query}%")) | (AssetQuote.source_ticker.ilike(f"%{query}%"))
-        )
-        if fuzzy_enabled:
-            candidate_results = base_query.limit(50).all()
-            scored_results = []
-            for record in candidate_results:
-                score = max(
-                    fuzz.token_set_ratio(query, record.ticker.lower()),
-                    fuzz.token_set_ratio(query, record.source_ticker.lower())
+            asset_type = asset_type.upper()
+            if asset_type == "DERIVED":
+                # Query only DerivedTicker records
+                dt_query = session.query(DerivedTicker).filter(
+                    DerivedTicker.name.ilike(f"%{query}%")
                 )
-                scored_results.append((score, record))
-            scored_results.sort(key=lambda x: x[0], reverse=True)
-            final_results = [record for _, record in scored_results[offset: offset + limit]]
+                if fuzzy_enabled:
+                    candidate_results = dt_query.limit(50).all()
+                    scored_results = []
+                    for record in candidate_results:
+                        score = fuzz.token_set_ratio(query, record.name.lower())
+                        scored_results.append((score, record))
+                    scored_results.sort(key=lambda x: x[0], reverse=True)
+                    final_results = [record for _, record in scored_results][offset: offset + limit]
+                else:
+                    all_dt = dt_query.all()
+                    final_results = all_dt[offset: offset + limit]
+            else:
+                # Query only AssetQuote records with a matching asset_type
+                aq_query = session.query(AssetQuote).filter(
+                    AssetQuote.from_asset_type == asset_type
+                ).filter(
+                    (AssetQuote.ticker.ilike(f"%{query}%")) |
+                    (AssetQuote.source_ticker.ilike(f"%{query}%"))
+                )
+                if fuzzy_enabled:
+                    candidate_results = aq_query.limit(50).all()
+                    scored_results = []
+                    for record in candidate_results:
+                        score = max(
+                            fuzz.token_set_ratio(query, record.ticker.lower()),
+                            fuzz.token_set_ratio(query, record.source_ticker.lower())
+                        )
+                        scored_results.append((score, record))
+                    scored_results.sort(key=lambda x: x[0], reverse=True)
+                    final_results = [record for _, record in scored_results][offset: offset + limit]
+                else:
+                    final_results = aq_query.offset(offset).limit(limit).all()
         else:
-            final_results = base_query.offset(offset).limit(limit).all()
-        response = [
-            {"ticker": r.ticker, "source_ticker": r.source_ticker}
-            for r in final_results
-        ]
+            # No asset_type provided: combine both AssetQuote and DerivedTicker
+            aq_query = session.query(AssetQuote).filter(
+                (AssetQuote.ticker.ilike(f"%{query}%")) |
+                (AssetQuote.source_ticker.ilike(f"%{query}%"))
+            )
+            dt_query = session.query(DerivedTicker).filter(
+                DerivedTicker.name.ilike(f"%{query}%")
+            )
+            if fuzzy_enabled:
+                candidate_aq = aq_query.limit(50).all()
+                candidate_dt = dt_query.limit(50).all()
+                scored_results = []
+                for record in candidate_aq:
+                    score = max(
+                        fuzz.token_set_ratio(query, record.ticker.lower()),
+                        fuzz.token_set_ratio(query, record.source_ticker.lower())
+                    )
+                    scored_results.append((score, record))
+                for record in candidate_dt:
+                    score = fuzz.token_set_ratio(query, record.name.lower())
+                    scored_results.append((score, record))
+                scored_results.sort(key=lambda x: x[0], reverse=True)
+                combined_results = [record for _, record in scored_results]
+                final_results = combined_results[offset: offset + limit]
+            else:
+                results_aq = aq_query.all()
+                results_dt = dt_query.all()
+                # Optionally, sort combined results alphabetically by ticker/name
+                combined_results = results_aq + results_dt
+                combined_results.sort(key=lambda r: r.ticker.lower() if hasattr(r, "ticker") else r.name.lower())
+                final_results = combined_results[offset: offset + limit]
+
+        # Build a uniform response
+        response = []
+        for record in final_results:
+            if isinstance(record, AssetQuote):
+                response.append({
+                    "ticker": record.ticker,
+                    "source_ticker": record.source_ticker,
+                    "asset_type": record.from_asset_type
+                })
+            elif isinstance(record, DerivedTicker):
+                response.append({
+                    "ticker": record.name,
+                    "source_ticker": "",
+                    "asset_type": "DERIVED",
+                    "formula": record.formula
+                })
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error fetching tickers: {e}")
