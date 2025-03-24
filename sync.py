@@ -73,21 +73,28 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
                     source_ticker=ticker
                 )
                 session.add(asset_quote)
+                session.flush()  # Ensure asset_quote.id is available
             else:
                 asset_quote.source_ticker = ticker
 
             if ticker in historical_data and historical_data[ticker] is not None:
                 df = historical_data[ticker]
+                # Fetch existing OHLCV records for this asset_quote once
+                existing_records = { rec.price_date: rec for rec in session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id).all() }
                 for date, row_data in df.iterrows():
-                    price_date = date if isinstance(date, datetime.datetime) else datetime.datetime.combine(date, datetime.time())
-                    exists = session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id, price_date=price_date).first()
-                    if exists:
+                    # Normalize date to a datetime with time set to 00:00:00
+                    if isinstance(date, datetime.datetime):
+                        price_date = date.replace(hour=0, minute=0, second=0, microsecond=0)
+                    else:
+                        price_date = datetime.datetime.combine(date, datetime.time())
+                    if price_date in existing_records:
                         if upsert:
-                            exists.open_price = safe_convert(row_data.get("Open"), float)
-                            exists.high_price = safe_convert(row_data.get("High"), float)
-                            exists.low_price = safe_convert(row_data.get("Low"), float)
-                            exists.close_price = safe_convert(row_data.get("Close"), float)
-                            exists.volume = safe_convert(row_data.get("Volume"), Decimal)
+                            rec = existing_records[price_date]
+                            rec.open_price = safe_convert(row_data.get("Open"), float)
+                            rec.high_price = safe_convert(row_data.get("High"), float)
+                            rec.low_price = safe_convert(row_data.get("Low"), float)
+                            rec.close_price = safe_convert(row_data.get("Close"), float)
+                            rec.volume = safe_convert(row_data.get("Volume"), Decimal)
                     else:
                         ohlcv = AssetOHLCV(
                             asset_quote=asset_quote,
@@ -166,21 +173,26 @@ def update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False):
                     source_ticker=composite_ticker
                 )
                 session.add(asset_quote)
+                session.flush()
             else:
                 asset_quote.source_ticker = composite_ticker
 
             if coin_id in historical_data and historical_data[coin_id] is not None:
                 df = historical_data[coin_id]
+                existing_records = { rec.price_date: rec for rec in session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id).all() }
                 for date, row_data in df.iterrows():
-                    price_date = date if isinstance(date, datetime.datetime) else datetime.datetime.combine(date, datetime.time())
-                    exists = session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id, price_date=price_date).first()
-                    if exists:
+                    if isinstance(date, datetime.datetime):
+                        price_date = date.replace(hour=0, minute=0, second=0, microsecond=0)
+                    else:
+                        price_date = datetime.datetime.combine(date, datetime.time())
+                    if price_date in existing_records:
                         if upsert:
-                            exists.open_price = safe_convert(row_data.get("open"), float)
-                            exists.high_price = safe_convert(row_data.get("high"), float)
-                            exists.low_price = safe_convert(row_data.get("low"), float)
-                            exists.close_price = safe_convert(row_data.get("close"), float)
-                            exists.volume = safe_convert(row_data.get("volume"), Decimal)
+                            rec = existing_records[price_date]
+                            rec.open_price = safe_convert(row_data.get("open"), float)
+                            rec.high_price = safe_convert(row_data.get("high"), float)
+                            rec.low_price = safe_convert(row_data.get("low"), float)
+                            rec.close_price = safe_convert(row_data.get("close"), float)
+                            rec.volume = safe_convert(row_data.get("volume"), Decimal)
                     else:
                         ohlcv = AssetOHLCV(
                             asset_quote=asset_quote,
@@ -231,21 +243,26 @@ def update_currency_asset_and_quote(currency_list, historical_data, upsert=False
                     source_ticker=currency_code
                 )
                 session.add(asset_quote)
+                session.flush()
             else:
                 asset_quote.source_ticker = currency_code
 
             if currency_code in historical_data and historical_data[currency_code] is not None:
                 df = historical_data[currency_code]
+                existing_records = { rec.price_date: rec for rec in session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id).all() }
                 for date, row_data in df.iterrows():
-                    price_date = date if isinstance(date, datetime.datetime) else datetime.datetime.combine(date, datetime.time())
-                    exists = session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id, price_date=price_date).first()
-                    if exists:
+                    if isinstance(date, datetime.datetime):
+                        price_date = date.replace(hour=0, minute=0, second=0, microsecond=0)
+                    else:
+                        price_date = datetime.datetime.combine(date, datetime.time())
+                    if price_date in existing_records:
                         if upsert:
-                            exists.open_price = safe_convert(row_data.get("Open"), float)
-                            exists.high_price = safe_convert(row_data.get("High"), float)
-                            exists.low_price = safe_convert(row_data.get("Low"), float)
-                            exists.close_price = safe_convert(row_data.get("Close"), float)
-                            exists.volume = None
+                            rec = existing_records[price_date]
+                            rec.open_price = safe_convert(row_data.get("Open"), float)
+                            rec.high_price = safe_convert(row_data.get("High"), float)
+                            rec.low_price = safe_convert(row_data.get("Low"), float)
+                            rec.close_price = safe_convert(row_data.get("Close"), float)
+                            rec.volume = None
                     else:
                         ohlcv = AssetOHLCV(
                             asset_quote=asset_quote,
@@ -544,3 +561,4 @@ def refresh_all_latest_prices():
     # refresh_currency_prices()
     import cache_storage
     cache_storage.last_cache_refresh = datetime.datetime.now()
+
