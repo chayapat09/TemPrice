@@ -455,6 +455,7 @@
               <option value="STOCK">Stock</option>
               <option value="CRYPTO">Crypto</option>
               <option value="CURRENCY">Currency</option>
+              <option value="DERIVED">Derived</option>
             </select>
             <input type="text" id="sync-ticker-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px; margin-left: 0.5rem;">
             <div id="sync-ticker-suggestions" class="autocomplete-suggestions" style="display: none;"></div>
@@ -488,10 +489,12 @@
           </div>
           <div style="padding: 1rem;">
             <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; position: relative;">
+              <!-- Updated dropdown to include Derived -->
               <select id="asset-type-select" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border);">
                 <option value="STOCK" selected>Stock</option>
                 <option value="CRYPTO">Crypto</option>
                 <option value="CURRENCY">Currency</option>
+                <option value="DERIVED">Derived</option>
               </select>
               <input type="text" id="ticker-search-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px;">
               <div id="ticker-search-suggestions" class="autocomplete-suggestions" style="display: none;"></div>
@@ -510,6 +513,7 @@
                   <option value="open">Open Price</option>
                   <option value="high">High Price</option>
                   <option value="low">Low Price</option>
+                  <option value="derived_value">Derived Value</option>
                 </select>
               </div>
             </div>
@@ -661,7 +665,6 @@
             <td><span class="badge badge-success">Up to date</span></td>
           </tr>`;
         }
-        // Update API Stats section with total requests.
         document.getElementById('api-stats').textContent = data.api_requests_24h + " requests";
       })
       .catch(err => console.error('Error fetching stats:', err));
@@ -820,30 +823,58 @@
     const rowsPerPage = 10;
 
     function fetchHistoricalData(ticker) {
-      // Call /api/unified with ticker only, as per app.py
+      // Call /api/unified with ticker
       fetch(`/api/unified?ticker=${ticker}`)
         .then(response => {
           if (!response.ok) throw new Error('Ticker not found');
           return response.json();
         })
         .then(data => {
-          let metaHtml = `
-            <p><strong>Ticker:</strong> ${data.ticker}</p>
-            <p><strong>Source Ticker:</strong> ${data.source_ticker}</p>
-            <p><strong>Data Source:</strong> ${data.data_source}</p>
-            <p><strong>Asset Type:</strong> ${data.from_asset.asset_type}</p>
-            <p><strong>Asset Symbol:</strong> ${data.from_asset.symbol}</p>
-            <p><strong>Quote Currency:</strong> ${data.to_asset.symbol}</p>
-            <p><strong>Latest Price (Cache):</strong> ${data.latest_cache.price} <small>at ${data.latest_cache.timestamp}</small></p>
-          `;
+          let metaHtml = '';
+          // Check if the returned asset is derived
+          if (data.asset_type && data.asset_type.toUpperCase() === "DERIVED") {
+            metaHtml = `
+              <p><strong>Ticker:</strong> ${data.ticker}</p>
+              <p><strong>Formula:</strong> ${data.formula}</p>
+              <p><strong>Asset Type:</strong> DERIVED</p>
+              <p><strong>Latest Price:</strong> ${data.latest_price}</p>
+              <p><strong>Context:</strong> ${JSON.stringify(data.latest_context)}</p>
+            `;
+            // Force chart to use derived_value and disable dataType selector
+            document.getElementById('dataType').value = 'derived_value';
+            document.getElementById('dataType').disabled = true;
+          } else {
+            metaHtml = `
+              <p><strong>Ticker:</strong> ${data.ticker}</p>
+              <p><strong>Source Ticker:</strong> ${data.source_ticker}</p>
+              <p><strong>Data Source:</strong> ${data.data_source}</p>
+              <p><strong>Asset Type:</strong> ${data.from_asset.asset_type}</p>
+              <p><strong>Asset Symbol:</strong> ${data.from_asset.symbol}</p>
+              <p><strong>Quote Currency:</strong> ${data.to_asset.symbol}</p>
+              <p><strong>Latest Price (Cache):</strong> ${data.latest_cache.price} <small>at ${data.latest_cache.timestamp}</small></p>
+            `;
+            document.getElementById('dataType').disabled = false;
+          }
           document.getElementById('meta-data-content').innerHTML = metaHtml;
           document.getElementById('chart-title').textContent = `${data.ticker} Price Chart`;
-          fullData = data.historical_data.map((item, index, arr) => {
-            if (index > 0) {
-              const prevClose = arr[index - 1].close;
-              item.change = parseFloat(((item.close - prevClose) / prevClose * 100).toFixed(2));
-            } else {
+
+          // Process historical data:
+          // For derived tickers, the API returns objects with date and derived_value.
+          fullData = data.historical_data.map(item => {
+            if (data.asset_type && data.asset_type.toUpperCase() === "DERIVED") {
+              item.close = item.derived_value;
+              item.open = item.derived_value;
+              item.high = item.derived_value;
+              item.low = item.derived_value;
+              item.volume = 0;
               item.change = 0;
+            } else {
+              // For standard tickers, you can calculate change if needed.
+              if (item.open && item.close) {
+                // If previous close is available, compute percentage change.
+                // (For simplicity, setting change to 0 here; update as needed.)
+                item.change = 0;
+              }
             }
             return item;
           });
@@ -883,7 +914,7 @@
           data: {
             labels: displayData.map(item => item.date),
             datasets: [{
-              label: dataType.charAt(0).toUpperCase() + dataType.slice(1) + ' Price',
+              label: dataType.charAt(0).toUpperCase() + dataType.slice(1) + (dataType === 'derived_value' ? ' (Derived)' : ' Price'),
               data: displayData.map(item => item[dataType]),
               borderColor: '#2563eb',
               backgroundColor: 'rgba(37, 99, 235, 0.1)',

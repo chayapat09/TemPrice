@@ -4,16 +4,19 @@ import os
 import time
 from collections import Counter
 from apscheduler.schedulers.background import BackgroundScheduler
-from models import Session, AssetQuote, AssetOHLCV, DeltaSyncState, Asset
-from sync import full_sync_stocks, full_sync_crypto, delta_sync_stocks, delta_sync_crypto, full_sync_currency, delta_sync_currency, refresh_all_latest_prices, latest_cache, last_cache_refresh , refresh_currency_prices
+from models import Session, AssetQuote, AssetOHLCV, DeltaSyncState, Asset, DerivedTicker
+from sync import full_sync_stocks, full_sync_crypto, delta_sync_stocks, delta_sync_crypto, full_sync_currency, delta_sync_currency, refresh_all_latest_prices, latest_cache, last_cache_refresh, refresh_currency_prices
 from utils import load_query_counter, save_query_counter, query_counter, prepopulate_currency_assets
 import logging
 from data_fetchers import StockDataSource, CryptoDataSource, CurrencyDataSource
+
+import traceback
 
 logger = logging.getLogger(__name__)
 
 api_stats = Counter()
 app = Flask(__name__)
+
 @app.before_request
 def before_request():
     if request.path.startswith('/api/'):
@@ -28,40 +31,87 @@ def get_unified_ticker():
     session = Session()
     try:
         asset_quote = session.query(AssetQuote).filter_by(ticker=ticker).first()
-        if not asset_quote:
-            return jsonify({"error": "Ticker not found"}), 404
-        ohlcv_records = session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id).all()
-        ds_key = (asset_quote.data_source.name.upper() if asset_quote.data_source else "UNKNOWN", asset_quote.source_ticker)
-        cache_entry = latest_cache.get(ds_key, (None, None))
-        unified_data = {
-            "ticker": asset_quote.ticker,
-            "source_ticker": asset_quote.source_ticker,
-            "data_source": asset_quote.data_source.name if asset_quote.data_source else None,
-            "from_asset": {
-                "asset_type": asset_quote.from_asset_type,
-                "symbol": asset_quote.from_asset_symbol,
-            },
-            "to_asset": {
-                "asset_type": asset_quote.to_asset_type,
-                "symbol": asset_quote.to_asset_symbol,
-            },
-            "latest_cache": {
-                "price": cache_entry[0],
-                "timestamp": cache_entry[1].isoformat() if cache_entry[1] else None
-            },
-            "historical_data": [
-                {
-                    "date": record.price_date.isoformat(),
-                    "open": float(record.open_price) if record.open_price is not None else None,
-                    "high": float(record.high_price) if record.high_price is not None else None,
-                    "low": float(record.low_price) if record.low_price is not None else None,
-                    "close": float(record.close_price) if record.close_price is not None else None,
-                    "volume": float(record.volume) if record.volume is not None else None,
-                }
-                for record in ohlcv_records
-            ]
-        }
-        return jsonify(unified_data)
+        if asset_quote:
+            ohlcv_records = session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id).all()
+            ds_key = (asset_quote.data_source.name.upper() if asset_quote.data_source else "UNKNOWN", asset_quote.source_ticker)
+            cache_entry = latest_cache.get(ds_key, (None, None))
+            unified_data = {
+                "ticker": asset_quote.ticker,
+                "source_ticker": asset_quote.source_ticker,
+                "data_source": asset_quote.data_source.name if asset_quote.data_source else None,
+                "from_asset": {
+                    "asset_type": asset_quote.from_asset_type,
+                    "symbol": asset_quote.from_asset_symbol,
+                },
+                "to_asset": {
+                    "asset_type": asset_quote.to_asset_type,
+                    "symbol": asset_quote.to_asset_symbol,
+                },
+                "latest_cache": {
+                    "price": cache_entry[0],
+                    "timestamp": cache_entry[1].isoformat() if cache_entry[1] else None
+                },
+                "historical_data": [
+                    {
+                        "date": record.price_date.isoformat(),
+                        "open": float(record.open_price) if record.open_price is not None else None,
+                        "high": float(record.high_price) if record.high_price is not None else None,
+                        "low": float(record.low_price) if record.low_price is not None else None,
+                        "close": float(record.close_price) if record.close_price is not None else None,
+                        "volume": float(record.volume) if record.volume is not None else None,
+                    }
+                    for record in ohlcv_records
+                ]
+            }
+            return jsonify(unified_data)
+        else:
+            # Check if ticker exists as a DerivedTicker
+            from utils import extract_tickers, safe_eval_expr, get_historical_series, get_latest_price_for_asset
+            derived = session.query(DerivedTicker).filter_by(name=ticker).first()
+            if not derived:
+                return jsonify({"error": "Ticker not found"}), 404
+            underlying_tickers = extract_tickers(derived.formula)
+            # Compute latest price
+            context = {}
+            for ut in underlying_tickers:
+                price = get_latest_price_for_asset(ut)
+                if price in [None, "NOT_FOUND"]:
+                    return jsonify({"error": f"Latest price for underlying ticker {ut} not found"}), 404
+                context[ut] = price
+            try:
+                latest_price = safe_eval_expr(derived.formula, context)
+            except Exception as e:
+                logger.error(f"Error evaluating derived formula: {e}\n{traceback.format_exc()}")
+                return jsonify({"error": f"Error evaluating formula: {str(e)}"}), 500
+            # Get historical series for each underlying ticker
+            historical_series = {}
+            for ut in underlying_tickers:
+                series = get_historical_series(ut)
+                if series:
+                    historical_series[ut] = series
+            historical_data = []
+            if historical_series:
+                common_dates = set.intersection(*(set(data.keys()) for data in historical_series.values()))
+                common_dates = sorted(common_dates)
+                for d in common_dates:
+                    context_day = {ut: historical_series[ut][d] for ut in underlying_tickers}
+                    try:
+                        value = safe_eval_expr(derived.formula, context_day)
+                    except Exception as e:
+                        value = None
+                    historical_data.append({
+                        "date": d.isoformat(),
+                        "derived_value": value
+                    })
+            unified_data = {
+                "ticker": derived.name,
+                "formula": derived.formula,
+                "asset_type": "DERIVED",
+                "latest_price": latest_price,
+                "latest_context": context,
+                "historical_data": historical_data
+            }
+            return jsonify(unified_data)
     except Exception as e:
         logger.error(f"Error fetching unified ticker data: {e}")
         return jsonify({"error": "Database error"}), 500
@@ -116,34 +166,125 @@ def get_latest():
     asset_type = request.args.get("asset_type", "STOCK").upper()
     if not ticker:
         return jsonify({"error": "Ticker parameter is required"}), 400
-    session = Session()
-    try:
-        asset_quote = session.query(AssetQuote).filter_by(ticker=ticker).first()
-        if asset_quote:
-            ds_key = (asset_quote.data_source.name.upper() if asset_quote.data_source else "UNKNOWN", asset_quote.source_ticker)
-        else:
-            ds_key = (None, None)
-    finally:
-        session.close()
-    timestamp = latest_cache.get(ds_key, (None, datetime.datetime.now()))[1]
-    result = None
-    if asset_type == "STOCK":
-        result = StockDataSource.get_latest_price(asset_quote.source_ticker) if asset_quote else "NOT_FOUND"
-    elif asset_type == "CRYPTO":
-        result = CryptoDataSource.get_latest_price(asset_quote.source_ticker) if asset_quote else "NOT_FOUND"
-    elif asset_type == "CURRENCY":
-        result = CurrencyDataSource.get_latest_price(asset_quote.source_ticker) if asset_quote else "NOT_FOUND"
-    if isinstance(result, (int, float)):
+    if asset_type == "DERIVED":
+        session = Session()
+        try:
+            from utils import extract_tickers, safe_eval_expr, get_latest_price_for_asset
+            derived = session.query(DerivedTicker).filter_by(name=ticker).first()
+        finally:
+            session.close()
+        if not derived:
+            return jsonify({"error": "Derived ticker not found"}), 404
+        underlying_tickers = extract_tickers(derived.formula)
+        context = {}
+        for ut in underlying_tickers:
+            price = get_latest_price_for_asset(ut)
+            if price in [None, "NOT_FOUND"]:
+                return jsonify({"error": f"Latest price for underlying ticker {ut} not found"}), 404
+            context[ut] = price
+        try:
+            result = safe_eval_expr(derived.formula, context)
+        except Exception as e:
+            return jsonify({"error": f"Error evaluating formula: {str(e)}"}), 500
+        now = datetime.datetime.now()
         return jsonify({
             "ticker": ticker,
-            "asset_type": asset_type,
+            "asset_type": "DERIVED",
             "price": result,
-            "timestamp": timestamp.isoformat() if timestamp else None
+            "formula": derived.formula,
+            "context": context,
+            "timestamp": now.isoformat()
         })
-    elif result == "NOT_FOUND":
-        return jsonify({"error": "Ticker not found"}), 404
     else:
-        return jsonify({"error": "Unable to fetch latest price"}), 500
+        session = Session()
+        try:
+            asset_quote = session.query(AssetQuote).filter_by(ticker=ticker).first()
+            if asset_quote:
+                ds_key = (asset_quote.data_source.name.upper() if asset_quote.data_source else "UNKNOWN", asset_quote.source_ticker)
+            else:
+                ds_key = (None, None)
+        finally:
+            session.close()
+        timestamp = latest_cache.get(ds_key, (None, datetime.datetime.now()))[1]
+        result = None
+        if asset_type == "STOCK":
+            result = StockDataSource.get_latest_price(asset_quote.source_ticker) if asset_quote else "NOT_FOUND"
+        elif asset_type == "CRYPTO":
+            result = CryptoDataSource.get_latest_price(asset_quote.source_ticker) if asset_quote else "NOT_FOUND"
+        elif asset_type == "CURRENCY":
+            result = CurrencyDataSource.get_latest_price(asset_quote.source_ticker) if asset_quote else "NOT_FOUND"
+        if isinstance(result, (int, float)):
+            return jsonify({
+                "ticker": ticker,
+                "asset_type": asset_type,
+                "price": result,
+                "timestamp": timestamp.isoformat() if timestamp else None
+            })
+        elif result == "NOT_FOUND":
+            return jsonify({"error": "Ticker not found"}), 404
+        else:
+            return jsonify({"error": "Unable to fetch latest price"}), 500
+
+@app.route("/api/historical")
+def get_historical():
+    ticker = request.args.get("ticker")
+    asset_type = request.args.get("asset_type", "STOCK").upper()
+    if not ticker:
+        return jsonify({"error": "Ticker parameter is required"}), 400
+    if asset_type == "DERIVED":
+        session = Session()
+        try:
+            from utils import extract_tickers, safe_eval_expr, get_historical_series
+            derived = session.query(DerivedTicker).filter_by(name=ticker).first()
+        finally:
+            session.close()
+        if not derived:
+            return jsonify({"error": "Derived ticker not found"}), 404
+        underlying_tickers = extract_tickers(derived.formula)
+        historical_data_dict = {}
+        for ut in underlying_tickers:
+            series = get_historical_series(ut)
+            if not series:
+                return jsonify({"error": f"Historical data for underlying ticker {ut} not found"}), 404
+            historical_data_dict[ut] = series
+        common_dates = set.intersection(*(set(data.keys()) for data in historical_data_dict.values()))
+        common_dates = sorted(common_dates)
+        derived_historical = []
+        for d in common_dates:
+            context = {ut: historical_data_dict[ut][d] for ut in underlying_tickers}
+            try:
+                value = safe_eval_expr(derived.formula, context)
+            except Exception as e:
+                continue
+            derived_historical.append({
+                "date": d.isoformat(),
+                "derived_value": value
+            })
+        return jsonify({"ticker": ticker, "asset_type": "DERIVED", "formula": derived.formula, "historical_data": derived_historical})
+    else:
+        session = Session()
+        try:
+            asset_quote = session.query(AssetQuote).filter_by(ticker=ticker).first()
+            if not asset_quote:
+                return jsonify({"error": "No historical data found for ticker"}), 404
+            records = session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id).all()
+            data = [
+                {
+                    "date": record.price_date.isoformat(),
+                    "open": float(record.open_price) if record.open_price is not None else None,
+                    "high": float(record.high_price) if record.high_price is not None else None,
+                    "low": float(record.low_price) if record.low_price is not None else None,
+                    "close": float(record.close_price) if record.close_price is not None else None,
+                    "volume": float(record.volume) if record.volume is not None else None,
+                }
+                for record in records
+            ]
+            return jsonify({"ticker": ticker, "historical_data": data})
+        except Exception as e:
+            logger.error(f"Error fetching historical data: {e}")
+            return jsonify({"error": "Database error"}), 500
+        finally:
+            session.close()
 
 @app.route("/api/assets")
 def get_assets():
@@ -170,34 +311,6 @@ def get_assets():
     finally:
         session.close()
 
-@app.route("/api/historical")
-def get_historical():
-    ticker = request.args.get("ticker")
-    if not ticker:
-        return jsonify({"error": "Ticker parameter is required"}), 400
-    session = Session()
-    try:
-        asset_quote = session.query(AssetQuote).filter_by(ticker=ticker).first()
-        if not asset_quote:
-            return jsonify({"error": "No historical data found for ticker"}), 404
-        records = session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id).all()
-        data = [
-            {
-                "date": record.price_date.isoformat(),
-                "open": float(record.open_price) if record.open_price is not None else None,
-                "high": float(record.high_price) if record.high_price is not None else None,
-                "low": float(record.low_price) if record.low_price is not None else None,
-                "close": float(record.close_price) if record.close_price is not None else None,
-                "volume": float(record.volume) if record.volume is not None else None,
-            }
-            for record in records
-        ]
-        return jsonify({"ticker": ticker, "historical_data": data})
-    except Exception as e:
-        logger.error(f"Error fetching historical data: {e}")
-        return jsonify({"error": "Database error"}), 500
-    finally:
-        session.close()
 
 @app.route("/api/stats")
 def get_stats():
@@ -424,6 +537,84 @@ def sync_delta():
         logger.error(f"Error in delta sync: {e}")
         return jsonify({"error": str(e)}), 500
 
+# New endpoints for managing Derived Tickers
+@app.route("/api/derived", methods=["GET"])
+def list_derived_tickers():
+    session = Session()
+    try:
+        tickers = session.query(DerivedTicker).all()
+        data = [{"name": dt.name, "formula": dt.formula} for dt in tickers]
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Error listing derived tickers: {e}")
+        return jsonify({"error": "Database error"}), 500
+    finally:
+        session.close()
+
+@app.route("/api/derived", methods=["POST"])
+def create_derived_ticker():
+    data = request.get_json() or {}
+    name = data.get("name")
+    formula = data.get("formula")
+    if not name or not formula:
+        return jsonify({"error": "Name and formula are required"}), 400
+    session = Session()
+    try:
+        exists = session.query(DerivedTicker).filter_by(name=name).first()
+        if exists:
+            return jsonify({"error": "Derived ticker with this name already exists"}), 400
+        dt = DerivedTicker(name=name, formula=formula)
+        session.add(dt)
+        session.commit()
+        return jsonify({"message": f"Derived ticker {name} created successfully."})
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error creating derived ticker: {e}")
+        return jsonify({"error": "Database error"}), 500
+    finally:
+        session.close()
+
+@app.route("/api/derived/<name>", methods=["PUT"])
+def update_derived_ticker(name):
+    data = request.get_json() or {}
+    formula = data.get("formula")
+    if not formula:
+        return jsonify({"error": "Formula is required"}), 400
+    session = Session()
+    try:
+        dt = session.query(DerivedTicker).filter_by(name=name).first()
+        if not dt:
+            return jsonify({"error": "Derived ticker not found"}), 404
+        dt.formula = formula
+        session.commit()
+        return jsonify({"message": f"Derived ticker {name} updated successfully."})
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error updating derived ticker: {e}")
+        return jsonify({"error": "Database error"}), 500
+    finally:
+        session.close()
+
+@app.route("/api/derived/<name>", methods=["DELETE"])
+def delete_derived_ticker(name):
+    session = Session()
+    try:
+        dt = session.query(DerivedTicker).filter_by(name=name).first()
+        if not dt:
+            return jsonify({"error": "Derived ticker not found"}), 404
+        session.delete(dt)
+        session.commit()
+        return jsonify({"message": f"Derived ticker {name} deleted successfully."})
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error deleting derived ticker: {e}")
+        return jsonify({"error": "Database error"}), 500
+    finally:
+        session.close()
+
+@app.route("/derived_ticker_manager")
+def derived_ticker_manager():
+    return render_template('derived_ticker_manager.html')
 @app.route("/dashboard")
 def dashboard():
     return render_template('dashboard.html')

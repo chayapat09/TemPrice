@@ -539,6 +539,6 @@ def refresh_all_latest_prices():
     from utils import query_counter
     refresh_stock_top_n_tickers(query_counter, TOP_N_TICKERS, REQUEST_DELAY_SECONDS)
     refresh_crypto_prices()
-    refresh_currency_prices()
+    # refresh_currency_prices()
     global last_cache_refresh
     last_cache_refresh = datetime.datetime.now()
