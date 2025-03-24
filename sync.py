@@ -16,16 +16,45 @@ logger = logging.getLogger(__name__)
 def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
     session = Session()
     try:
+        # Preload data source
         data_source = session.query(DataSource).filter_by(name="yFinance").first()
         if not data_source:
             data_source = DataSource(name="yFinance", description="Yahoo Finance data source")
             session.add(data_source)
             session.commit()
-
+        
+        # Preload existing stock assets for all tickers
+        tickers = quotes_df["symbol"].dropna().unique().tolist()
+        existing_assets = { asset.symbol: asset for asset in session.query(Asset).filter(Asset.asset_type=="STOCK", Asset.symbol.in_(tickers)).all() }
+        
+        # Determine quote currencies per ticker
+        exchange_currency_map = {
+            "NMS": "USD",
+            "NYQ": "USD",
+            "SET": "THB"
+        }
+        ticker_currency = {}
+        currency_codes = set()
+        for idx, row in quotes_df.iterrows():
+            ticker = row.get("symbol")
+            exchange = row.get("exchange")
+            if ticker:
+                quote_currency = exchange_currency_map.get(exchange, "USD")
+                ticker_currency[ticker] = quote_currency
+                currency_codes.add(quote_currency)
+        
+        # Preload currency assets
+        existing_currency_assets = { asset.symbol: asset for asset in session.query(CurrencyAsset).filter(CurrencyAsset.symbol.in_(list(currency_codes))).all() }
+        
+        # Preload existing asset quotes for composite tickers
+        composite_tickers = [ticker + ticker_currency[ticker] for ticker in ticker_currency]
+        existing_asset_quotes = { aq.ticker: aq for aq in session.query(AssetQuote).filter(AssetQuote.ticker.in_(composite_tickers), AssetQuote.data_source_id==data_source.id).all() }
+        
         for idx, row in quotes_df.iterrows():
             ticker = row.get("symbol")
             if not ticker:
                 continue
+            logger.info(f"Processing stock ticker: {ticker}")
             name = row.get("longName") or row.get("displayName") or ticker
             language = row.get("language")
             region = row.get("region")
@@ -33,12 +62,14 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
             full_exchange_name = row.get("fullExchangeName")
             first_trade = safe_convert(row.get("first_trade_date"), lambda x: datetime.datetime.fromtimestamp(x / 1000).date()) if row.get("first_trade_date") else None
 
-            asset = session.query(Asset).filter_by(asset_type="STOCK", symbol=ticker).first()
+            # Get or create stock asset
+            asset = existing_assets.get(ticker)
             if not asset:
                 asset = StockAsset(asset_type="STOCK", symbol=ticker, name=name, language=language,
                                    region=region, exchange=exchange, full_exchange_name=full_exchange_name,
                                    first_trade_date=first_trade, source_asset_key=ticker)
                 session.add(asset)
+                existing_assets[ticker] = asset
             else:
                 asset.name = name
                 asset.source_asset_key = ticker
@@ -49,19 +80,15 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
                     asset.full_exchange_name = full_exchange_name
                     asset.first_trade_date = first_trade
 
-            exchange_currency_map = {
-                "NMS": "USD",
-                "NYQ": "USD",
-                "SET": "THB"
-            }
-            quote_currency = exchange_currency_map.get(exchange, "USD")
-            currency_asset = session.query(CurrencyAsset).filter_by(asset_type="CURRENCY", symbol=quote_currency).first()
+            quote_currency = ticker_currency[ticker]
+            currency_asset = existing_currency_assets.get(quote_currency)
             if not currency_asset:
                 currency_asset = CurrencyAsset(asset_type="CURRENCY", symbol=quote_currency, name=quote_currency, source_asset_key=quote_currency)
                 session.add(currency_asset)
-            
+                existing_currency_assets[quote_currency] = currency_asset
+
             composite_ticker = ticker + quote_currency
-            asset_quote = session.query(AssetQuote).filter_by(ticker=composite_ticker, data_source_id=data_source.id).first()
+            asset_quote = existing_asset_quotes.get(composite_ticker)
             if not asset_quote:
                 asset_quote = AssetQuote(
                     from_asset_type="STOCK",
@@ -73,16 +100,18 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
                     source_ticker=ticker
                 )
                 session.add(asset_quote)
-                session.flush()  # Ensure asset_quote.id is available
+                session.flush()
+                existing_asset_quotes[composite_ticker] = asset_quote
             else:
                 asset_quote.source_ticker = ticker
 
             if ticker in historical_data and historical_data[ticker] is not None:
                 df = historical_data[ticker]
-                # Fetch existing OHLCV records for this asset_quote once
+                # Preload existing OHLCV records for this asset_quote
                 existing_records = { rec.price_date: rec for rec in session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id).all() }
+                new_records = []
+                update_mappings = []
                 for date, row_data in df.iterrows():
-                    # Normalize date to a datetime with time set to 00:00:00
                     if isinstance(date, datetime.datetime):
                         price_date = date.replace(hour=0, minute=0, second=0, microsecond=0)
                     else:
@@ -90,23 +119,33 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
                     if price_date in existing_records:
                         if upsert:
                             rec = existing_records[price_date]
-                            rec.open_price = safe_convert(row_data.get("Open"), float)
-                            rec.high_price = safe_convert(row_data.get("High"), float)
-                            rec.low_price = safe_convert(row_data.get("Low"), float)
-                            rec.close_price = safe_convert(row_data.get("Close"), float)
-                            rec.volume = safe_convert(row_data.get("Volume"), Decimal)
+                            update_mappings.append({
+                                "id": rec.id,
+                                "open_price": safe_convert(row_data.get("Open"), float),
+                                "high_price": safe_convert(row_data.get("High"), float),
+                                "low_price": safe_convert(row_data.get("Low"), float),
+                                "close_price": safe_convert(row_data.get("Close"), float),
+                                "volume": safe_convert(row_data.get("Volume"), Decimal)
+                            })
                     else:
-                        ohlcv = AssetOHLCV(
-                            asset_quote=asset_quote,
-                            price_date=price_date,
-                            open_price=safe_convert(row_data.get("Open"), float),
-                            high_price=safe_convert(row_data.get("High"), float),
-                            low_price=safe_convert(row_data.get("Low"), float),
-                            close_price=safe_convert(row_data.get("Close"), float),
-                            volume=safe_convert(row_data.get("Volume"), Decimal)
-                        )
-                        session.add(ohlcv)
+                        new_records.append({
+                            "asset_quote_id": asset_quote.id,
+                            "price_date": price_date,
+                            "open_price": safe_convert(row_data.get("Open"), float),
+                            "high_price": safe_convert(row_data.get("High"), float),
+                            "low_price": safe_convert(row_data.get("Low"), float),
+                            "close_price": safe_convert(row_data.get("Close"), float),
+                            "volume": safe_convert(row_data.get("Volume"), Decimal)
+                        })
+                logger.info(f"Ticker {ticker}: {len(new_records)} new records, {len(update_mappings)} records to update.")
+                if new_records:
+                    session.bulk_insert_mappings(AssetOHLCV, new_records)
+                    logger.info(f"Inserted {len(new_records)} new OHLCV records for ticker {ticker}.")
+                if update_mappings:
+                    session.bulk_update_mappings(AssetOHLCV, update_mappings)
+                    logger.info(f"Updated {len(update_mappings)} OHLCV records for ticker {ticker}.")
         session.commit()
+        logger.info("Stock asset and quote update completed successfully.")
     except SQLAlchemyError as e:
         session.rollback()
         logger.error(f"Error updating stock assets and quotes: {e}")
@@ -122,10 +161,31 @@ def update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False):
             data_source = DataSource(name="Binance", description="Binance API data source")
             session.add(data_source)
             session.commit()
-
+        
+        # Preload existing crypto assets for all coins
+        coin_ids = [coin.get("id") for coin in crypto_data if coin.get("id")]
+        coin_id_to_symbol = { coin.get("id"): coin.get("symbol").upper() for coin in crypto_data if coin.get("id") }
+        existing_assets = { asset.symbol: asset for asset in session.query(Asset).filter(Asset.asset_type=="CRYPTO", Asset.symbol.in_(list(coin_id_to_symbol.values()))).all() }
+        
+        # Currency is fixed to USDT for crypto
+        currency_code = "USDT"
+        existing_currency_assets = { asset.symbol: asset for asset in session.query(CurrencyAsset).filter(CurrencyAsset.symbol==currency_code).all() }
+        if currency_code not in existing_currency_assets:
+            currency_asset = CurrencyAsset(asset_type="CURRENCY", symbol=currency_code, name="Tether USD", source_asset_key=currency_code)
+            session.add(currency_asset)
+            session.commit()
+            existing_currency_assets[currency_code] = currency_asset
+        
+        # Preload existing asset quotes for composite tickers (coin_symbol + USDT)
+        composite_tickers = [coin_id_to_symbol[coin_id] + currency_code for coin_id in coin_id_to_symbol]
+        existing_asset_quotes = { aq.ticker: aq for aq in session.query(AssetQuote).filter(AssetQuote.ticker.in_(composite_tickers), AssetQuote.data_source_id==data_source.id).all() }
+        
         for coin in crypto_data:
             coin_id = coin.get("id")
+            if not coin_id:
+                continue
             coin_symbol = coin.get("symbol").upper()
+            logger.info(f"Processing crypto ticker: {coin_symbol}")
             name = coin.get("name")
             image = coin.get("image")
             ath = safe_convert(coin.get("ath"), float)
@@ -135,13 +195,14 @@ def update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False):
             total_supply = safe_convert(coin.get("total_supply"), int)
             max_supply = safe_convert(coin.get("max_supply"), int)
             
-            asset = session.query(Asset).filter_by(asset_type="CRYPTO", symbol=coin_symbol).first()
+            asset = existing_assets.get(coin_symbol)
             if not asset:
                 asset = CryptoAsset(asset_type="CRYPTO", symbol=coin_symbol, name=name, image=image,
                                     ath=ath, ath_date=ath_date, atl=atl, atl_date=atl_date,
                                     total_supply=total_supply, max_supply=max_supply,
                                     source_asset_key=coin_id)
                 session.add(asset)
+                existing_assets[coin_symbol] = asset
             else:
                 asset.name = name
                 asset.source_asset_key = coin_id
@@ -154,32 +215,29 @@ def update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False):
                     asset.total_supply = total_supply
                     asset.max_supply = max_supply
             
-            quote_currency = "USDT"
-            currency_asset = session.query(CurrencyAsset).filter_by(asset_type="CURRENCY", symbol=quote_currency).first()
-            if not currency_asset:
-                currency_asset = CurrencyAsset(asset_type="CURRENCY", symbol=quote_currency, name="Tether USD", source_asset_key=quote_currency)
-                session.add(currency_asset)
-            
-            composite_ticker = coin_symbol + quote_currency
-            asset_quote = session.query(AssetQuote).filter_by(ticker=composite_ticker, data_source_id=data_source.id).first()
+            composite_ticker = coin_symbol + currency_code
+            asset_quote = existing_asset_quotes.get(composite_ticker)
             if not asset_quote:
                 asset_quote = AssetQuote(
                     from_asset_type="CRYPTO",
                     from_asset_symbol=coin_symbol,
                     to_asset_type="CURRENCY",
-                    to_asset_symbol=quote_currency,
+                    to_asset_symbol=currency_code,
                     data_source_id=data_source.id,
                     ticker=composite_ticker,
                     source_ticker=composite_ticker
                 )
                 session.add(asset_quote)
                 session.flush()
+                existing_asset_quotes[composite_ticker] = asset_quote
             else:
                 asset_quote.source_ticker = composite_ticker
 
             if coin_id in historical_data and historical_data[coin_id] is not None:
                 df = historical_data[coin_id]
                 existing_records = { rec.price_date: rec for rec in session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id).all() }
+                new_records = []
+                update_mappings = []
                 for date, row_data in df.iterrows():
                     if isinstance(date, datetime.datetime):
                         price_date = date.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -188,23 +246,33 @@ def update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False):
                     if price_date in existing_records:
                         if upsert:
                             rec = existing_records[price_date]
-                            rec.open_price = safe_convert(row_data.get("open"), float)
-                            rec.high_price = safe_convert(row_data.get("high"), float)
-                            rec.low_price = safe_convert(row_data.get("low"), float)
-                            rec.close_price = safe_convert(row_data.get("close"), float)
-                            rec.volume = safe_convert(row_data.get("volume"), Decimal)
+                            update_mappings.append({
+                                "id": rec.id,
+                                "open_price": safe_convert(row_data.get("open"), float),
+                                "high_price": safe_convert(row_data.get("high"), float),
+                                "low_price": safe_convert(row_data.get("low"), float),
+                                "close_price": safe_convert(row_data.get("close"), float),
+                                "volume": safe_convert(row_data.get("volume"), Decimal)
+                            })
                     else:
-                        ohlcv = AssetOHLCV(
-                            asset_quote=asset_quote,
-                            price_date=price_date,
-                            open_price=safe_convert(row_data.get("open"), float),
-                            high_price=safe_convert(row_data.get("high"), float),
-                            low_price=safe_convert(row_data.get("low"), float),
-                            close_price=safe_convert(row_data.get("close"), float),
-                            volume=safe_convert(row_data.get("volume"), Decimal)
-                        )
-                        session.add(ohlcv)
+                        new_records.append({
+                            "asset_quote_id": asset_quote.id,
+                            "price_date": price_date,
+                            "open_price": safe_convert(row_data.get("open"), float),
+                            "high_price": safe_convert(row_data.get("high"), float),
+                            "low_price": safe_convert(row_data.get("low"), float),
+                            "close_price": safe_convert(row_data.get("close"), float),
+                            "volume": safe_convert(row_data.get("volume"), Decimal)
+                        })
+                logger.info(f"Crypto ticker {coin_symbol}: {len(new_records)} new records, {len(update_mappings)} records to update.")
+                if new_records:
+                    session.bulk_insert_mappings(AssetOHLCV, new_records)
+                    logger.info(f"Inserted {len(new_records)} new OHLCV records for crypto ticker {coin_symbol}.")
+                if update_mappings:
+                    session.bulk_update_mappings(AssetOHLCV, update_mappings)
+                    logger.info(f"Updated {len(update_mappings)} OHLCV records for crypto ticker {coin_symbol}.")
         session.commit()
+        logger.info("Crypto asset and quote update completed successfully.")
     except SQLAlchemyError as e:
         session.rollback()
         logger.error(f"Error updating crypto assets and quotes: {e}")
@@ -220,18 +288,28 @@ def update_currency_asset_and_quote(currency_list, historical_data, upsert=False
             data_source = DataSource(name="AlphaVantage", description="AlphaVantage FX data source")
             session.add(data_source)
             session.commit()
-
+        
+        # Preload existing currency assets for provided currencies
+        codes = [code for code, name in currency_list]
+        existing_currency_assets = { asset.symbol: asset for asset in session.query(CurrencyAsset).filter(CurrencyAsset.symbol.in_(codes)).all() }
+        
+        # Preload existing asset quotes for composite tickers (currency_code + "USD")
+        composite_tickers = [code + "USD" for code in codes]
+        existing_asset_quotes = { aq.ticker: aq for aq in session.query(AssetQuote).filter(AssetQuote.ticker.in_(composite_tickers), AssetQuote.data_source_id==data_source.id).all() }
+        
         for currency_code, currency_name in currency_list:
-            asset = session.query(CurrencyAsset).filter_by(asset_type="CURRENCY", symbol=currency_code).first()
+            logger.info(f"Processing currency: {currency_code}")
+            asset = existing_currency_assets.get(currency_code)
             if not asset:
                 asset = CurrencyAsset(asset_type="CURRENCY", symbol=currency_code, name=currency_name, source_asset_key=currency_code)
                 session.add(asset)
+                existing_currency_assets[currency_code] = asset
             else:
                 asset.name = currency_name
                 asset.source_asset_key = currency_code
             
             composite_ticker = currency_code + "USD"
-            asset_quote = session.query(AssetQuote).filter_by(ticker=composite_ticker, data_source_id=data_source.id).first()
+            asset_quote = existing_asset_quotes.get(composite_ticker)
             if not asset_quote:
                 asset_quote = AssetQuote(
                     from_asset_type="CURRENCY",
@@ -244,12 +322,15 @@ def update_currency_asset_and_quote(currency_list, historical_data, upsert=False
                 )
                 session.add(asset_quote)
                 session.flush()
+                existing_asset_quotes[composite_ticker] = asset_quote
             else:
                 asset_quote.source_ticker = currency_code
 
             if currency_code in historical_data and historical_data[currency_code] is not None:
                 df = historical_data[currency_code]
                 existing_records = { rec.price_date: rec for rec in session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id).all() }
+                new_records = []
+                update_mappings = []
                 for date, row_data in df.iterrows():
                     if isinstance(date, datetime.datetime):
                         price_date = date.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -258,23 +339,33 @@ def update_currency_asset_and_quote(currency_list, historical_data, upsert=False
                     if price_date in existing_records:
                         if upsert:
                             rec = existing_records[price_date]
-                            rec.open_price = safe_convert(row_data.get("Open"), float)
-                            rec.high_price = safe_convert(row_data.get("High"), float)
-                            rec.low_price = safe_convert(row_data.get("Low"), float)
-                            rec.close_price = safe_convert(row_data.get("Close"), float)
-                            rec.volume = None
+                            update_mappings.append({
+                                "id": rec.id,
+                                "open_price": safe_convert(row_data.get("Open"), float),
+                                "high_price": safe_convert(row_data.get("High"), float),
+                                "low_price": safe_convert(row_data.get("Low"), float),
+                                "close_price": safe_convert(row_data.get("Close"), float),
+                                "volume": None
+                            })
                     else:
-                        ohlcv = AssetOHLCV(
-                            asset_quote=asset_quote,
-                            price_date=price_date,
-                            open_price=safe_convert(row_data.get("Open"), float),
-                            high_price=safe_convert(row_data.get("High"), float),
-                            low_price=safe_convert(row_data.get("Low"), float),
-                            close_price=safe_convert(row_data.get("Close"), float),
-                            volume=None
-                        )
-                        session.add(ohlcv)
+                        new_records.append({
+                            "asset_quote_id": asset_quote.id,
+                            "price_date": price_date,
+                            "open_price": safe_convert(row_data.get("Open"), float),
+                            "high_price": safe_convert(row_data.get("High"), float),
+                            "low_price": safe_convert(row_data.get("Low"), float),
+                            "close_price": safe_convert(row_data.get("Close"), float),
+                            "volume": None
+                        })
+                logger.info(f"Currency {currency_code}: {len(new_records)} new records, {len(update_mappings)} records to update.")
+                if new_records:
+                    session.bulk_insert_mappings(AssetOHLCV, new_records)
+                    logger.info(f"Inserted {len(new_records)} new OHLCV records for currency {currency_code}.")
+                if update_mappings:
+                    session.bulk_update_mappings(AssetOHLCV, update_mappings)
+                    logger.info(f"Updated {len(update_mappings)} OHLCV records for currency {currency_code}.")
         session.commit()
+        logger.info("Currency asset and quote update completed successfully.")
     except SQLAlchemyError as e:
         session.rollback()
         logger.error(f"Error updating currency assets and quotes: {e}")
@@ -288,8 +379,10 @@ def full_sync_stocks():
     logger.info("Starting Global Full Sync for Stocks...")
     query_th = yf.EquityQuery("eq", ["region", "th"])
     quotes_df_th, historical_data_th = fetch_yf_data(MAX_TICKERS_PER_REQUEST, REQUEST_DELAY_SECONDS, query_th, start_date=HISTORICAL_START_DATE)
+    logger.info(f"Fetched data for Thai stocks: {len(quotes_df_th)} records.")
     query_us = yf.EquityQuery("is-in", ["exchange", "NMS", "NYQ"])
     quotes_df_us, historical_data_us = fetch_yf_data(MAX_TICKERS_PER_REQUEST, REQUEST_DELAY_SECONDS, query_us, start_date=HISTORICAL_START_DATE)
+    logger.info(f"Fetched data for US stocks: {len(quotes_df_us)} records.")
     quotes_df = pd.concat([quotes_df_th, quotes_df_us], ignore_index=True)
     historical_data = {**historical_data_th, **historical_data_us}
     update_stock_asset_and_quote(quotes_df, historical_data, upsert=False)
@@ -322,10 +415,12 @@ def delta_sync_stocks():
     quotes_df_th, historical_data_th = fetch_yf_data(MAX_TICKERS_PER_REQUEST, REQUEST_DELAY_SECONDS, query_th,
                                                        start_date=two_days_ago.strftime("%Y-%m-%d"),
                                                        end_date=today.strftime("%Y-%m-%d"))
+    logger.info(f"Delta sync - Thai stocks: {len(quotes_df_th)} records.")
     query_us = yf.EquityQuery("is-in", ["exchange", "NMS", "NYQ"])
     quotes_df_us, historical_data_us = fetch_yf_data(MAX_TICKERS_PER_REQUEST, REQUEST_DELAY_SECONDS, query_us,
                                                        start_date=two_days_ago.strftime("%Y-%m-%d"),
                                                        end_date=today.strftime("%Y-%m-%d"))
+    logger.info(f"Delta sync - US stocks: {len(quotes_df_us)} records.")
     quotes_df = pd.concat([quotes_df_th, quotes_df_us], ignore_index=True)
     historical_data = {**historical_data_th, **historical_data_us}
     update_stock_asset_and_quote(quotes_df, historical_data, upsert=True)
@@ -353,8 +448,10 @@ def full_sync_crypto():
     for coin in crypto_data:
         coin_id = coin.get("id")
         symbol = coin.get("symbol").upper() + "USDT"
+        logger.info(f"Fetching historical data for crypto ticker: {symbol}")
         df = fetch_binance_crypto_data(symbol, HISTORICAL_START_DATE, None)
         historical_data[coin_id] = df
+        logger.info(f"Fetched historical data for {symbol}")
         time.sleep(REQUEST_DELAY_SECONDS)
     update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False)
     session = Session()
@@ -386,8 +483,10 @@ def delta_sync_crypto():
     for coin in crypto_data:
         coin_id = coin.get("id")
         symbol = coin.get("symbol").upper() + "USDT"
+        logger.info(f"Fetching delta historical data for crypto ticker: {symbol}")
         df = fetch_binance_crypto_data(symbol, two_days_ago.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
         historical_data[coin_id] = df
+        logger.info(f"Fetched delta historical data for {symbol}")
         time.sleep(REQUEST_DELAY_SECONDS)
     update_crypto_asset_and_quote(crypto_data, historical_data, upsert=True)
     session = Session()
@@ -423,6 +522,7 @@ def full_sync_currency(ticker=None):
     historical_data = {}
     from data_fetchers import fetch_fx_daily_data
     for currency_code, _ in currency_list:
+        logger.info(f"Fetching historical FX data for currency: {currency_code}")
         if currency_code.upper() == "USD":
             df = pd.DataFrame({
                 "Open": [1.0],
@@ -479,6 +579,7 @@ def delta_sync_currency(ticker=None):
     historical_data = {}
     from data_fetchers import fetch_fx_daily_data
     for currency_code, _ in currency_list:
+        logger.info(f"Fetching delta FX data for currency: {currency_code}")
         if currency_code.upper() == "USD":
             df = pd.DataFrame({
                 "Open": [1.0],
@@ -561,4 +662,3 @@ def refresh_all_latest_prices():
     # refresh_currency_prices()
     import cache_storage
     cache_storage.last_cache_refresh = datetime.datetime.now()
-
