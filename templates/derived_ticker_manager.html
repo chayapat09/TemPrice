@@ -417,7 +417,7 @@
 
   // Load available tickers from the /api/tickers endpoint with a wildcard query ("%25")
   function loadAvailableTickers() {
-    fetch('/api/tickers?query=%25&limit=1000')
+    fetch('/api/tickers?query=%25&limit=100000')
       .then(response => response.json())
       .then(data => {
         availableTickers = data.map(item => item.ticker);

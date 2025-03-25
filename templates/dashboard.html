@@ -39,6 +39,10 @@
       justify-content: space-between;
       align-items: center;
     }
+    .header-left {
+      display: flex;
+      flex-direction: column;
+    }
     h1, h2, h3 {
       margin: 0;
     }
@@ -289,7 +293,7 @@
       font-size: 14px;
     }
     .data-table th {
-      background-color: #f9fafb;
+      background-color: #f9fafc;
       text-align: left;
       padding: 10px;
       font-weight: 600;
@@ -360,7 +364,7 @@
   <header>
     <div class="container">
       <div class="header-content">
-        <div>
+        <div class="header-left">
           <h1>StockData Management Dashboard</h1>
         </div>
         <div class="refresh-section">
@@ -446,6 +450,7 @@
           </div>
         </div>
 
+        <!-- Force Sync for Ticker Card -->
         <div class="card">
           <div class="card-header">
             <h2>Force Sync for Ticker</h2>
@@ -461,6 +466,8 @@
             <div id="sync-ticker-suggestions" class="autocomplete-suggestions" style="display: none;"></div>
             <button class="button button-primary" id="force-full-sync-btn" style="margin-left: 0.5rem;">Force Full Sync</button>
             <button class="button button-outline" id="force-delta-sync-btn" style="margin-left: 0.5rem;">Force Delta Sync</button>
+            <!-- Added button for Derived Ticker Manager -->
+            <button class="button button-outline" onclick="window.location.href='/derived_ticker_manager'" style="margin-left: 0.5rem;">Add Custom Ticker</button>
           </div>
           <div id="sync-message" style="color: var(--success);"></div>
         </div>
@@ -869,10 +876,7 @@
               item.volume = 0;
               item.change = 0;
             } else {
-              // For standard tickers, you can calculate change if needed.
               if (item.open && item.close) {
-                // If previous close is available, compute percentage change.
-                // (For simplicity, setting change to 0 here; update as needed.)
                 item.change = 0;
               }
             }

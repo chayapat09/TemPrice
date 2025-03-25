@@ -323,8 +323,8 @@ def get_tickers():
     try:
         limit = int(request.args.get("limit", 10))
         page = int(request.args.get("page", 1))
-        from config import MAX_TICKERS_PER_REQUEST
-        limit = min(limit, MAX_TICKERS_PER_REQUEST)
+        # from config import MAX_TICKERS_PER_REQUEST
+        # limit = min(limit, MAX_TICKERS_PER_REQUEST)
         offset = (page - 1) * limit
     except ValueError:
         return jsonify({"error": "Invalid pagination parameters"}), 400
