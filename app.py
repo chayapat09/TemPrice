@@ -674,5 +674,5 @@ if __name__ == "__main__":
     scheduler.add_job(delta_sync_crypto, "interval", days=DELTA_SYNC_INTERVAL_DAYS, id="delta_sync_crypto")
     scheduler.add_job(save_query_counter, "interval", minutes=QUERY_COUNTER_SAVE_INTERVAL_MINUTES, id="save_query_counter")
     scheduler.add_job(refresh_currency_prices, "interval", minutes=CURRENCY_CACHE_REFRESH_INTERVAL_MINUTES, id="currency_cache_refresh")
-    # scheduler.start()
+    scheduler.start()
     app.run(host=FLASK_HOST, port=FLASK_PORT)
