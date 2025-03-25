@@ -116,44 +116,59 @@ allowed_operators = {
 def safe_eval_expr(expr, context):
     """
     Safely evaluate an arithmetic expression with given context.
-    Only allows basic arithmetic operations and variables from context.
+    Only allows basic arithmetic operations, variables from context, and attribute access for dotted tickers.
     """
     node = ast.parse(expr, mode='eval')
-    def eval_(node):
-        if isinstance(node, ast.Expression):
-            return eval_(node.body)
-        elif isinstance(node, ast.Num):  # For Python <3.8
-            return node.n
-        elif isinstance(node, ast.Constant):  # For Python 3.8+
-            return node.value
-        elif isinstance(node, ast.BinOp):
-            left = eval_(node.left)
-            right = eval_(node.right)
-            operator = allowed_operators.get(type(node.op))
-            if operator is None:
-                raise TypeError(f"Unsupported operator: {node.op}")
-            return operator(left, right)
-        elif isinstance(node, ast.UnaryOp):
-            operand = eval_(node.operand)
-            operator = allowed_operators.get(type(node.op))
-            if operator is None:
-                raise TypeError(f"Unsupported unary operator: {node.op}")
-            return operator(operand)
-        elif isinstance(node, ast.Name):
-            if node.id in context:
-                return context[node.id]
-            else:
-                raise ValueError(f"Unknown variable: {node.id}")
+    
+    def get_full_name(n):
+        if isinstance(n, ast.Name):
+            return n.id
+        elif isinstance(n, ast.Attribute):
+            return get_full_name(n.value) + "." + n.attr
         else:
-            raise TypeError(f"Unsupported expression: {node}")
+            raise TypeError(f"Unsupported node type in attribute access: {n}")
+    
+    def eval_(n):
+        if isinstance(n, ast.Expression):
+            return eval_(n.body)
+        elif isinstance(n, ast.Num):  # For Python <3.8
+            return n.n
+        elif isinstance(n, ast.Constant):  # For Python 3.8+
+            return n.value
+        elif isinstance(n, ast.BinOp):
+            left = eval_(n.left)
+            right = eval_(n.right)
+            operator = allowed_operators.get(type(n.op))
+            if operator is None:
+                raise TypeError(f"Unsupported operator: {n.op}")
+            return operator(left, right)
+        elif isinstance(n, ast.UnaryOp):
+            operand = eval_(n.operand)
+            operator = allowed_operators.get(type(n.op))
+            if operator is None:
+                raise TypeError(f"Unsupported unary operator: {n.op}")
+            return operator(operand)
+        elif isinstance(n, ast.Name):
+            if n.id in context:
+                return context[n.id]
+            else:
+                raise ValueError(f"Unknown variable: {n.id}")
+        elif isinstance(n, ast.Attribute):
+            full_name = get_full_name(n)
+            if full_name in context:
+                return context[full_name]
+            else:
+                raise ValueError(f"Unknown variable: {full_name}")
+        else:
+            raise TypeError(f"Unsupported expression: {n}")
     return eval_(node)
 
 def extract_tickers(formula):
     """
     Extract ticker symbols from formula.
-    Assumes ticker symbols are sequences of uppercase letters and digits that are not numbers.
+    Assumes ticker symbols are sequences of uppercase letters, digits, and may include dots.
     """
-    tokens = re.findall(r"[A-Z0-9]+", formula)
+    tokens = re.findall(r"[A-Z0-9]+(?:\.[A-Z0-9]+)*", formula)
     tickers = []
     for token in tokens:
         try:
