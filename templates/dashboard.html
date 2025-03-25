@@ -4,7 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>StockData Management Dashboard</title>
+  <!-- External libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
   <style>
+    /* Root Variables */
     :root {
       --primary: #2563eb;
       --primary-light: #3b82f6;
@@ -16,40 +20,103 @@
       --dark: #1e293b;
       --border: #e2e8f0;
     }
+    /* Global Styles */
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       margin: 0;
       padding: 0;
       background-color: #f1f5f9;
       color: var(--dark);
+      font-size: 14px;
     }
     .container {
       max-width: 1400px;
       margin: 0 auto;
       padding: 1rem;
     }
+    /* Header */
     header {
       background-color: #fff;
       padding: 1rem;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
       margin-bottom: 1.5rem;
-    }
-    .header-content {
       display: flex;
+      flex-wrap: wrap;
       justify-content: space-between;
       align-items: center;
+      gap: 1rem;
     }
-    .header-left {
+    header .brand {
+      font-size: 1.75rem;
+      font-weight: bold;
+      color: var(--dark);
+    }
+    header .status {
+      font-size: 0.875rem;
+      color: var(--secondary);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .status span {
+      margin-right: 0.5rem;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .status-dot.loading { 
+      background-color: #ccc; 
+      animation: pulse 1.5s infinite ease-in-out; 
+    }
+    .status-dot.success { background-color: var(--success); }
+    .status-dot.warning { background-color: var(--warning); }
+    .status-dot.error { background-color: var(--danger); }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .stats-card {
+      background-color: #fff;
+      border-radius: 0.5rem;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      padding: 1rem;
+      border-left: 4px solid var(--primary);
       display: flex;
       flex-direction: column;
+      justify-content: center;
     }
-    h1, h2, h3 {
-      margin: 0;
+    .stats-label {
+      font-size: 0.8rem;
+      color: var(--secondary);
+      margin-bottom: 0.3rem;
+      text-transform: uppercase;
     }
+    .stats-value {
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: var(--dark);
+    }
+    /* Main Grid (Two Columns) */
+    .main-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+    }
+    /* Cards */
     .card {
       background-color: #fff;
       border-radius: 0.5rem;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
       padding: 1.5rem;
       margin-bottom: 1.5rem;
     }
@@ -60,94 +127,16 @@
       border-bottom: 1px solid var(--border);
       padding-bottom: 1rem;
       margin-bottom: 1rem;
+      flex-wrap: wrap;
+      gap: 0.5rem;
     }
-    .grid {
-      display: grid;
-      gap: 1.5rem;
+    h1, h2, h3 {
+      margin: 0;
+      color: var(--dark);
     }
-    .stats-grid {
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 15px;
-      margin-bottom: 20px;
-    }
-    .stats-card {
-      padding: 1.5rem;
-      border-left: 4px solid var(--primary);
-      display: flex;
-      flex-direction: column;
-    }
-    .stats-label {
-      font-size: 0.875rem;
-      color: var(--secondary);
-      margin-bottom: 0.5rem;
-    }
-    .stats-value {
-      font-size: 1.5rem;
-      font-weight: 600;
-    }
-    .two-column {
-      grid-template-columns: 2fr 1fr;
-    }
-    .table-wrapper {
-      overflow-x: auto;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    th, td {
-      padding: 0.75rem 1rem;
-      text-align: left;
-      border-bottom: 1px solid var(--border);
-    }
-    th {
-      background-color: #f8fafc;
-      font-weight: 600;
-    }
-    .button {
-      display: inline-block;
-      padding: 0.5rem 1rem;
-      border-radius: 0.25rem;
-      font-weight: 500;
-      cursor: pointer;
-      text-decoration: none;
-      transition: background-color 0.2s;
-    }
-    .button-primary {
-      background-color: var(--primary);
-      color: #fff;
-      border: none;
-    }
-    .button-primary:hover {
-      background-color: var(--primary-light);
-    }
-    .button-outline {
-      background-color: #fff;
-      color: var(--primary);
-      border: 1px solid var(--primary);
-    }
-    .button-outline:hover {
-      background-color: #f8fafc;
-    }
-    .badge {
-      display: inline-block;
-      padding: 0.25rem 0.5rem;
-      border-radius: 0.25rem;
-      font-size: 0.75rem;
-      font-weight: 600;
-    }
-    .badge-success {
-      background-color: var(--success);
-      color: #fff;
-    }
-    .badge-warning {
-      background-color: var(--warning);
-      color: #fff;
-    }
-    .badge-danger {
-      background-color: var(--danger);
-      color: #fff;
-    }
+    h2 { font-size: 1.25rem; }
+    h3 { font-size: 1.1rem; margin-bottom: 0.75rem; }
+    /* Tabs */
     .tabs {
       display: flex;
       border-bottom: 1px solid var(--border);
@@ -157,191 +146,130 @@
       padding: 0.75rem 1rem;
       cursor: pointer;
       border-bottom: 2px solid transparent;
+      color: var(--secondary);
+      margin-bottom: -1px;
     }
     .tab.active {
       border-bottom: 2px solid var(--primary);
       color: var(--primary);
-      font-weight: 500;
+      font-weight: 600;
     }
-    .tab-content {
-      display: none;
-    }
-    .tab-content.active {
-      display: block;
-    }
-    .refresh-section {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 0.875rem;
-    }
-    .success-dot, .warning-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    /* Buttons */
+    .button {
       display: inline-block;
+      padding: 0.5rem 1rem;
+      border-radius: 0.25rem;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      border: 1px solid transparent;
+      font-size: 0.875rem;
+      text-align: center;
     }
-    .success-dot {
-      background-color: var(--success);
-    }
-    .warning-dot {
-      background-color: var(--warning);
-    }
-    .progress {
-      height: 8px;
-      background-color: #e2e8f0;
-      border-radius: 4px;
-      overflow: hidden;
-      margin-top: 0.5rem;
-    }
-    .progress-bar {
-      height: 100%;
+    .button-primary {
       background-color: var(--primary);
-      width: 75%;
+      color: #fff;
+      border-color: var(--primary);
     }
-    .chart-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 20px;
-    }
-    .chart-title {
-      font-size: 22px;
-      font-weight: 600;
-      margin: 0;
-    }
-    .controls {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-    }
-    select, button {
-      padding: 8px 12px;
-      border-radius: 4px;
-      border: 1px solid #d1d5db;
+    .button-primary:hover { background-color: var(--primary-light); border-color: var(--primary-light); }
+    .button-outline {
       background-color: #fff;
-      font-size: 14px;
-      cursor: pointer;
+      color: var(--primary);
+      border: 1px solid var(--primary);
     }
-    select:focus, button:focus {
-      outline: none;
-      border-color: #2563eb;
-      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
-    }
-    button {
-      background-color: #2563eb;
+    .button-outline:hover { background-color: #eff6ff; }
+    .button-danger {
+      background-color: var(--danger);
       color: #fff;
-      border: none;
-      transition: background-color 0.2s;
+      border-color: var(--danger);
     }
-    button:hover {
-      background-color: #1d4ed8;
-    }
-    .timeframe-buttons {
+    .button-danger:hover { background-color: #f87171; border-color: #f87171; }
+    .button-group {
       display: flex;
-      gap: 8px;
-      margin-bottom: 15px;
+      gap: 0.5rem;
+      flex-wrap: wrap;
     }
-    .timeframe-button {
-      padding: 6px 10px;
-      border-radius: 4px;
-      border: 1px solid #d1d5db;
-      background-color: #f9fafb;
-      font-size: 13px;
-      cursor: pointer;
-      transition: all 0.2s;
-      color: #333;
+    /* Tables */
+    .table-wrapper {
+      overflow-x: auto;
     }
-    .timeframe-button:hover {
-      background-color: #e2e8f0;
-    }
-    .timeframe-button.active {
-      background-color: #2563eb;
-      color: #fff;
-      border-color: #2563eb;
-      font-weight: 600;
-      box-shadow: 0 0 5px rgba(37, 99, 235, 0.5);
-    }
-    .chart-container {
-      position: relative;
-      height: 400px;
-      margin-bottom: 20px;
-    }
-    .stat-card {
-      background-color: #f9fafb;
-      border-radius: 6px;
-      padding: 15px;
-    }
-    .stat-label {
-      font-size: 13px;
-      color: #6b7280;
-      margin-bottom: 5px;
-    }
-    .stat-value {
-      font-size: 18px;
-      font-weight: 600;
-    }
-    .positive {
-      color: #16a34a;
-    }
-    .negative {
-      color: #dc2626;
-    }
-    .data-table {
+    table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 14px;
+      font-size: 0.875rem;
     }
-    .data-table th {
-      background-color: #f9fafc;
+    th, td {
+      padding: 0.6rem 0.8rem;
       text-align: left;
-      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    th { background-color: #f8fafc; font-weight: 600; color: var(--secondary); }
+    tbody tr:hover { background-color: #f9fafb; }
+    /* Badges */
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.6rem;
+      border-radius: 1rem;
+      font-size: 0.75rem;
       font-weight: 600;
-      border-bottom: 1px solid #e5e7eb;
+      line-height: 1;
     }
-    .data-table td {
-      padding: 10px;
-      border-bottom: 1px solid #e5e7eb;
-    }
-    .data-table th:not(:first-child),
-    .data-table td:not(:first-child) {
-      text-align: right;
-    }
+    .badge-stock { background-color: #dbeafe; color: #1e40af; }
+    .badge-crypto { background-color: #fef3c7; color: #92400e; }
+    .badge-currency { background-color: #d1fae5; color: #065f46; }
+    .badge-derived { background-color: #e5e7eb; color: #4b5563; }
+    .badge-success { background-color: var(--success); color: #fff; }
+    .badge-warning { background-color: var(--warning); color: #fff; }
+    .badge-danger { background-color: var(--danger); color: #fff; }
+    /* Loading Overlay */
     .loading {
       position: absolute;
       top: 0;
       left: 0;
       right: 0;
       bottom: 0;
-      background-color: rgba(255, 255, 255, 0.8);
+      background-color: rgba(255,255,255,0.8);
       display: flex;
       justify-content: center;
       align-items: center;
-      font-size: 16px;
+      font-size: 1rem;
       font-weight: 500;
+      color: var(--secondary);
+      z-index: 10;
+      border-radius: 0.5rem;
     }
-    .hidden {
-      display: none;
-    }
+    .hidden { display: none; }
+    /* Pagination */
     .pagination {
       display: flex;
       justify-content: center;
       gap: 5px;
-      margin-top: 10px;
+      margin-top: 1rem;
+      padding-bottom: 1rem;
     }
     .pagination button {
       padding: 5px 10px;
       border-radius: 4px;
       background-color: #f3f4f6;
       color: #374151;
-      border: none;
+      border: 1px solid #d1d5db;
       cursor: pointer;
-      transition: background-color 0.2s;
+      font-size: 0.8rem;
+    }
+    .pagination button:disabled {
+      background-color: #e5e7eb;
+      color: #9ca3af;
+      cursor: not-allowed;
     }
     .pagination button.active {
       background-color: #2563eb;
       color: #fff;
+      border-color: #2563eb;
     }
+    /* Autocomplete */
     .autocomplete-suggestions {
       position: absolute;
       background-color: #fff;
@@ -350,68 +278,92 @@
       max-height: 200px;
       overflow-y: auto;
       z-index: 1000;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      width: calc(100% - 2px);
+      margin-top: 2px;
     }
     .autocomplete-suggestion {
-      padding: 0.5rem;
+      padding: 0.6rem 0.8rem;
       cursor: pointer;
+      font-size: 0.875rem;
     }
     .autocomplete-suggestion:hover {
-      background-color: var(--light);
+      background-color: #eff6ff;
+    }
+    .suggestion-ticker { font-weight: 600; }
+    .suggestion-source { font-size: 0.8em; color: var(--secondary); margin-left: 5px; }
+    .suggestion-type { float: right; font-size: 0.8em; }
+    /* Responsive Adjustments */
+    @media (max-width: 768px) {
+      .stats-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+      .main-grid { grid-template-columns: 1fr; }
+      header { flex-direction: column; align-items: flex-start; }
+      .button-group { width: 100%; }
+      .button { width: 100%; margin-bottom: 0.5rem; }
     }
   </style>
 </head>
 <body>
-  <header>
-    <div class="container">
-      <div class="header-content">
-        <div class="header-left">
-          <h1>StockData Management Dashboard</h1>
-        </div>
-        <div class="refresh-section">
-          <span class="success-dot"></span>
-          <span>Services Running</span>
-          <span style="margin-left: 1rem;">Last Cache Refresh: <strong id="last-cache-refresh">Loading...</strong></span>
-        </div>
-      </div>
-    </div>
-  </header>
-
   <div class="container">
-    <div class="grid stats-grid">
-      <div class="card stats-card">
-        <span class="stats-label">Total Tickers</span>
-        <span class="stats-value" id="total-tickers">Loading...</span>
+    <!-- Header -->
+    <header>
+      <div class="brand">StockData Dashboard</div>
+      <div class="status">
+        <span id="service-status-dot" class="status-dot loading" title="Loading status..."></span>
+        <span id="service-status-text">Services Status: Loading...</span>
       </div>
-      <div class="card stats-card" style="border-color: var(--success);">
-        <span class="stats-label">DB Size</span>
-        <span class="stats-value" id="db-size">Loading...</span>
+      <div class="status">
+        <span>Last Cache Refresh: <span id="last-cache-refresh">Loading...</span></span>
+        <span>| Next: <span id="next-cache-refresh">Loading...</span></span>
+        <span>| Size: <span id="cache-size">?</span></span>
       </div>
-      <div class="card stats-card" style="border-color: var(--warning);">
-        <span class="stats-label">Cache Hit Rate</span>
-        <span class="stats-value" id="cache-hit-rate">Loading...</span>
+    </header>
+    <!-- Stats Grid -->
+    <section class="stats-grid">
+      <div class="stats-card">
+        <div class="stats-label">Total Assets</div>
+        <div class="stats-value" id="total-assets">Loading...</div>
       </div>
-      <div class="card stats-card" style="border-color: var(--danger);">
-        <span class="stats-label">API Requests (24h)</span>
-        <span class="stats-value" id="api-requests-24h">Loading...</span>
+      <div class="stats-card">
+        <div class="stats-label">Asset Quotes</div>
+        <div class="stats-value" id="total-asset-quotes">Loading...</div>
       </div>
-    </div>
-
-    <div class="grid two-column">
+      <div class="stats-card">
+        <div class="stats-label">Derived Tickers</div>
+        <div class="stats-value" id="total-derived-tickers">Loading...</div>
+      </div>
+      <div class="stats-card">
+        <div class="stats-label">OHLCV Records</div>
+        <div class="stats-value" id="total-ohlcv-records">Loading...</div>
+      </div>
+      <div class="stats-card">
+        <div class="stats-label">DB Size</div>
+        <div class="stats-value" id="db-size">Loading...</div>
+      </div>
+      <div class="stats-card">
+        <div class="stats-label">API Requests (Runtime)</div>
+        <div class="stats-value" id="api-requests-runtime">Loading...</div>
+      </div>
+    </section>
+    <!-- Main Content -->
+    <section class="main-grid">
+      <!-- Left Column -->
       <div>
+        <!-- Data Management Card -->
         <div class="card">
           <div class="card-header">
-            <h2>Data Summary</h2>
-            <div>
-              <button class="button button-primary" id="global-delta-sync-btn">Run Delta Sync</button>
-              <button class="button button-outline" id="global-full-sync-btn" style="margin-left: 0.5rem;">Full Sync</button>
+            <h2>Data Management</h2>
+            <div class="button-group">
+              <button id="global-delta-sync-btn" class="button button-outline">Global Delta Sync</button>
+              <button id="global-full-sync-btn" class="button button-danger" onclick="return confirm('Run Global Full Sync? This may take a long time and overwrite existing data.')">Global Full Sync</button>
             </div>
           </div>
           <div class="tabs">
             <div class="tab active" data-tab="db-summary">Database Summary</div>
-            <div class="tab" data-tab="regions">Regions</div>
-            <div class="tab" data-tab="timeline">Timeline</div>
+            <div class="tab" data-tab="data-quality">Data Quality</div>
           </div>
-          <div class="tab-content active" id="db-summary">
+          <div id="db-summary" class="tab-content active">
+            <h3>Database Table Records</h3>
             <div class="table-wrapper">
               <table>
                 <thead>
@@ -421,110 +373,98 @@
                     <th>Status</th>
                   </tr>
                 </thead>
-                <tbody id="db-summary-body"></tbody>
+                <tbody id="db-summary-body">
+                  <tr><td colspan="3">Loading...</td></tr>
+                </tbody>
               </table>
             </div>
           </div>
-          <div class="tab-content" id="regions">
-            <div class="chart-container">
-              <div style="display: flex; height: 100%;">
-                <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 2rem;">
-                  <h3>Stock Distribution by Region</h3>
-                  <div style="margin: 2rem 0;" id="region-distribution">
-                    <p>Region distribution data not available.</p>
-                  </div>
-                </div>
-                <div style="width: 250px; height: 250px; position: relative; align-self: center;" id="region-pie"></div>
+          <div id="data-quality" class="tab-content">
+            <h3>Data Quality Metrics</h3>
+            <div id="data-quality-content">Loading...</div>
+          </div>
+          <div style="margin-top: 2rem;">
+            <h3>Force Sync for Ticker</h3>
+            <div class="controls" style="position: relative;">
+              <select id="sync-asset-type">
+                <option value="STOCK">STOCK</option>
+                <option value="CRYPTO">CRYPTO</option>
+                <option value="CURRENCY">CURRENCY</option>
+              </select>
+              <input type="text" id="sync-ticker-input" placeholder="Enter Ticker (e.g., AAPL, bitcoin, EUR)" />
+              <div id="sync-ticker-suggestions" class="autocomplete-suggestions"></div>
+              <div class="button-group" style="margin-top: 0.5rem;">
+                <button id="force-full-sync-btn" class="button button-outline">Full Sync</button>
+                <button id="force-delta-sync-btn" class="button button-primary">Delta Sync</button>
               </div>
             </div>
+            <div id="sync-message" class="message-info"></div>
           </div>
-          <div class="tab-content" id="timeline">
-            <div class="chart-container">
-              <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; flex-direction: column;">
-                <div style="width: 100%; height: 250px; background: linear-gradient(180deg, rgba(219,234,254,0.3) 0%, rgba(219,234,254,0) 100%);">
-                  <svg viewBox="0 0 800 250" style="width: 100%; height: 100%;"></svg>
-                </div>
-                <p style="margin-top: 1rem; font-size: 0.875rem; color: var(--secondary);">Database Growth Over Time (Records)</p>
-              </div>
-            </div>
+          <div style="margin-top: 2rem;">
+            <h3>Derived Tickers</h3>
+            <p>Create and manage custom tickers based on formulas.</p>
+            <a href="/derived_ticker_manager" target="_blank" class="button button-outline">Manage Derived Tickers</a>
           </div>
         </div>
-
-        <!-- Force Sync for Ticker Card -->
+        <!-- Ticker Traffic Card -->
         <div class="card">
           <div class="card-header">
-            <h2>Force Sync for Ticker</h2>
+            <h2>Top 200 Ticker Traffic (Runtime)</h2>
           </div>
-          <div style="margin-bottom: 1rem; position: relative;">
-            <select id="sync-asset-type" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border);">
-              <option value="STOCK">Stock</option>
-              <option value="CRYPTO">Crypto</option>
-              <option value="CURRENCY">Currency</option>
-              <option value="DERIVED">Derived</option>
-            </select>
-            <input type="text" id="sync-ticker-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px; margin-left: 0.5rem;">
-            <div id="sync-ticker-suggestions" class="autocomplete-suggestions" style="display: none;"></div>
-            <button class="button button-primary" id="force-full-sync-btn" style="margin-left: 0.5rem;">Force Full Sync</button>
-            <button class="button button-outline" id="force-delta-sync-btn" style="margin-left: 0.5rem;">Force Delta Sync</button>
-            <!-- Added button for Derived Ticker Manager -->
-            <button class="button button-outline" onclick="window.location.href='/derived_ticker_manager'" style="margin-left: 0.5rem;">Add Custom Ticker</button>
-          </div>
-          <div id="sync-message" style="color: var(--success);"></div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <h2>Top 200 Ticker Traffic</h2>
-          </div>
-          <div class="table-wrapper">
+          <div class="table-wrapper" style="max-height: 400px; overflow-y: auto;">
             <table>
               <thead>
                 <tr>
                   <th>Rank</th>
                   <th>Ticker</th>
+                  <th>Type</th>
                   <th>Query Count</th>
                 </tr>
               </thead>
-              <tbody id="ticker-traffic-body"></tbody>
+              <tbody id="ticker-traffic-body">
+                <tr><td colspan="4">Loading...</td></tr>
+              </tbody>
             </table>
           </div>
         </div>
-
-        <div class="card" id="unified-ticker-preview">
+      </div>
+      <!-- Right Column -->
+      <div>
+        <!-- Unified Ticker Data Preview Card -->
+        <div class="card">
           <div class="card-header">
             <h2>Unified Ticker Data Preview</h2>
           </div>
-          <div style="padding: 1rem;">
-            <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; position: relative;">
-              <!-- Updated dropdown to include Derived -->
-              <select id="asset-type-select" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border);">
-                <option value="STOCK" selected>Stock</option>
-                <option value="CRYPTO">Crypto</option>
-                <option value="CURRENCY">Currency</option>
-                <option value="DERIVED">Derived</option>
-              </select>
-              <input type="text" id="ticker-search-input" placeholder="Enter ticker symbol" style="padding: 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border); width: 200px;">
-              <div id="ticker-search-suggestions" class="autocomplete-suggestions" style="display: none;"></div>
-              <button class="button button-primary" id="ticker-search-btn" style="margin-left: 0.5rem;">Search</button>
-            </div>
-            <div id="meta-data-content" style="margin-bottom: 1rem; border: 1px solid #e2e8f0; padding: 1rem; border-radius: 0.25rem;">
-              <h3>Ticker Details</h3>
-              <div>Loading ticker details...</div>
-            </div>
-            <div class="chart-header">
-              <h1 class="chart-title" id="chart-title">Price Chart</h1>
+          <div class="controls" style="position: relative;">
+            <select id="asset-type-select" title="Filter suggestions by type (optional)">
+              <option value="">All Types</option>
+              <option value="STOCK">STOCK</option>
+              <option value="CRYPTO">CRYPTO</option>
+              <option value="CURRENCY">CURRENCY</option>
+              <option value="DERIVED">DERIVED</option>
+            </select>
+            <input type="text" id="ticker-search-input" placeholder="Search Ticker (e.g., AAPL, BTCUSD, EURUSD, MY_DERIVED)" />
+            <div id="ticker-search-suggestions" class="autocomplete-suggestions"></div>
+            <button id="ticker-search-btn" class="button button-primary">Search</button>
+          </div>
+          <div id="meta-data-content" class="meta-data-grid">
+            Loading ticker details...
+          </div>
+          <hr style="border: none; border-top: 1px solid var(--border); margin: 1rem 0;" />
+          <div>
+            <div class="chart-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+              <h3 id="chart-title">Price Chart</h3>
               <div class="controls">
-                <label for="dataType">Data Type:</label>
+                <label for="dataType" style="font-size: 0.8rem;">Data:</label>
                 <select id="dataType">
-                  <option value="close">Close Price</option>
+                  <option value="value" selected>Value/Close</option>
                   <option value="open">Open Price</option>
                   <option value="high">High Price</option>
                   <option value="low">Low Price</option>
-                  <option value="derived_value">Derived Value</option>
                 </select>
               </div>
             </div>
-            <div class="timeframe-buttons">
+            <div class="timeframe-buttons" style="margin-bottom: 1rem; display: flex; gap: 0.5rem;">
               <button class="timeframe-button active" data-days="30">1M</button>
               <button class="timeframe-button" data-days="90">3M</button>
               <button class="timeframe-button" data-days="180">6M</button>
@@ -533,31 +473,32 @@
               <button class="timeframe-button" data-days="1825">5Y</button>
               <button class="timeframe-button" data-days="all">All</button>
             </div>
-            <div class="chart-container">
+            <div class="chart-container" style="position: relative; height: 350px; margin-bottom: 1.5rem;">
               <canvas id="stockChart"></canvas>
               <div id="loadingIndicator" class="loading hidden">Loading chart data...</div>
             </div>
-            <!-- Stats Grid -->
-            <div class="stats-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px;">
-              <div class="stat-card" style="border: 1px solid var(--border); border-radius: 6px; padding: 15px;">
+            <div class="chart-stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+              <div class="stat-card">
                 <div class="stat-label">Period High</div>
                 <div class="stat-value" id="periodHigh">$0.00</div>
               </div>
-              <div class="stat-card" style="border: 1px solid var(--border); border-radius: 6px; padding: 15px;">
+              <div class="stat-card">
                 <div class="stat-label">Period Low</div>
                 <div class="stat-value" id="periodLow">$0.00</div>
               </div>
-              <div class="stat-card" style="border: 1px solid var(--border); border-radius: 6px; padding: 15px;">
+              <div class="stat-card">
                 <div class="stat-label">Average Volume</div>
                 <div class="stat-value" id="avgVolume">0</div>
               </div>
-              <div class="stat-card" style="border: 1px solid var(--border); border-radius: 6px; padding: 15px;">
+              <div class="stat-card">
                 <div class="stat-label">Period Change</div>
-                <div class="stat-value" id="periodChange">0.00%</div>
+                <div class="stat-value positive" id="periodChange">0.00%</div>
               </div>
             </div>
-            <h2 style="margin-bottom: 10px;">Recent Price Data</h2>
-            <div style="overflow-x: auto;">
+          </div>
+          <div>
+            <h3>Recent Price Data</h3>
+            <div class="table-wrapper">
               <table class="data-table">
                 <thead>
                   <tr>
@@ -565,7 +506,7 @@
                     <th>Open</th>
                     <th>High</th>
                     <th>Low</th>
-                    <th>Close</th>
+                    <th>Close/Value</th>
                     <th>Volume</th>
                     <th>Change %</th>
                   </tr>
@@ -573,163 +514,165 @@
                 <tbody id="dataTableBody"></tbody>
               </table>
             </div>
-            <div class="pagination" id="pagination"></div>
+            <div id="pagination" class="pagination"></div>
           </div>
         </div>
-      </div>
-
-      <div>
+        <!-- System Status Card -->
         <div class="card">
           <div class="card-header">
             <h2>System Status</h2>
           </div>
-          <div>
-            <div style="margin-bottom: 1.5rem;">
-              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                <span>Database Connection</span>
-                <span style="display: flex; align-items: center;"><span class="success-dot"></span> Connected</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                <span>Latest Cache</span>
-                <span style="display: flex; align-items: center;"><span class="success-dot"></span> Updated</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                <span>Next Cache Refresh</span>
-                <span id="next-cache-refresh">Loading...</span>
-              </div>
+          <div style="display: grid; gap: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span>Database Connection</span>
+              <span id="db-status"><span class="status-dot success"></span> Connected</span>
             </div>
-            <div style="margin-bottom: 1.5rem;">
-              <h3 style="margin-bottom: 1rem;">Scheduled Jobs</h3>
-              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                <span>Cache Refresh</span>
-                <span>Every 1 minute</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                <span>Currency Cache Refresh</span>
-                <span>Every 6 hours</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                <span>Delta Sync (All)</span>
-                <span>Daily</span>
-              </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span>Latest Cache Status</span>
+              <span id="cache-status"><span class="status-dot success"></span> Updated</span>
             </div>
+            <hr style="border: none; border-top: 1px solid var(--border);" />
             <div>
-              <h3 style="margin-bottom: 1rem;">API Stats (24h)</h3>
-              <div style="display: flex; justify-content: space-between;">
-                <span>Total Requests:</span>
-                <span id="api-stats">Loading...</span>
+              <h4>Scheduled Jobs</h4>
+              <div style="font-size: 0.875rem; color: var(--secondary); display: grid; gap: 0.5rem;">
+                <div>Cache Refresh: <span id="job-cache-refresh">Every X min</span></div>
+                <div>Currency Cache Refresh: <span id="job-currency-cache">Every Y min</span></div>
+                <div>Stock Delta Sync: <span id="job-delta-stock">Daily</span></div>
+                <div>Crypto Delta Sync: <span id="job-delta-crypto">Daily</span></div>
+                <div>Currency Delta Sync: <span id="job-delta-currency">Daily</span></div>
+                <div>Query Counter Save: <span id="job-query-save">Every Z min</span></div>
+              </div>
+            </div>
+            <hr style="border: none; border-top: 1px solid var(--border);" />
+            <div>
+              <h4>API Stats (Runtime)</h4>
+              <div style="font-size: 0.875rem; color: var(--secondary);">
+                Total Requests: <span id="api-stats-total">Loading...</span>
               </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </section>
   </div>
-
-  <!-- Chart.js and Luxon Libraries -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/luxon/3.0.1/luxon.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-adapter-luxon/1.2.0/chartjs-adapter-luxon.min.js"></script>
-
+  <!-- JavaScript -->
   <script>
-    // Tab functionality
+    /* ----- TAB FUNCTIONALITY ----- */
     document.querySelectorAll('.tab').forEach(tab => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
         document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-        document.getElementById(tab.getAttribute('data-tab')).classList.add('active');
+        const targetTabId = tab.getAttribute('data-tab');
+        const targetTabContent = document.getElementById(targetTabId);
+        if(targetTabContent) {
+          targetTabContent.classList.add('active');
+          if (targetTabId === 'data-quality') { fetchDataQuality(); }
+        } else {
+          console.error('Tab content not found for:', targetTabId);
+        }
       });
     });
 
-    // Update cache info
+    /* ----- CACHE INFO ----- */
     function updateCacheInfo() {
+      const cacheStatusDot = document.getElementById('cache-status').querySelector('.status-dot');
       fetch('/api/cache_info')
-        .then(response => response.json())
+        .then(response => {
+          if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+          return response.json();
+        })
         .then(data => {
-          document.getElementById('last-cache-refresh').textContent = data.last_cache_refresh ? new Date(data.last_cache_refresh).toLocaleString() : "Not yet refreshed";
-          document.getElementById('next-cache-refresh').textContent = data.next_cache_refresh;
+          document.getElementById('last-cache-refresh').textContent = data.last_cache_refresh !== 'N/A' ? new Date(data.last_cache_refresh).toLocaleString() : "N/A";
+          document.getElementById('next-cache-refresh').textContent = data.next_cache_refresh || "N/A";
+          document.getElementById('cache-size').textContent = data.cache_size !== undefined ? data.cache_size : '?';
+          if (data.last_cache_refresh) {
+            const lastRefresh = new Date(data.last_cache_refresh);
+            const now = new Date();
+            const minutesSinceRefresh = (now - lastRefresh) / (1000 * 60);
+            cacheStatusDot.className = minutesSinceRefresh < 5 ? 'status-dot success' : 'status-dot warning';
+          } else {
+            cacheStatusDot.className = 'status-dot warning';
+          }
+          document.getElementById('service-status-dot').className = 'status-dot success';
+          document.getElementById('service-status-text').textContent = 'Services Status: Running';
+        })
+        .catch(error => {
+          console.error('Error fetching cache info:', error);
+          document.getElementById('last-cache-refresh').textContent = 'Error';
+          document.getElementById('next-cache-refresh').textContent = 'Error';
+          document.getElementById('cache-size').textContent = '?';
+          document.getElementById('cache-status').querySelector('.status-dot').className = 'status-dot error';
+          document.getElementById('service-status-dot').className = 'status-dot error';
+          document.getElementById('service-status-text').textContent = 'Services Status: Error';
         });
     }
-    updateCacheInfo();
-    setInterval(updateCacheInfo, 60000);
 
-    // Fetch global stats
-    fetch('/api/stats')
-      .then(response => response.json())
-      .then(data => {
-        document.getElementById('total-tickers').textContent = data.total_assets;
-        document.getElementById('db-size').textContent = data.db_size;
-        document.getElementById('cache-hit-rate').textContent = data.cache_hit_rate;
-        document.getElementById('api-requests-24h').textContent = data.api_requests_24h;
-
-        const dbSummaryBody = document.getElementById('db-summary-body');
-        dbSummaryBody.innerHTML = '';
-        for (const [table, records] of Object.entries(data.table_records)) {
-          dbSummaryBody.innerHTML += `<tr>
-            <td>${table}</td>
-            <td>${records}</td>
-            <td><span class="badge badge-success">Up to date</span></td>
-          </tr>`;
-        }
-        document.getElementById('api-stats').textContent = data.api_requests_24h + " requests";
-      })
-      .catch(err => console.error('Error fetching stats:', err));
-
-    // Fuzzy search with updated fuzzy parameter
-    function setupAutocomplete(inputId, suggestionsId, assetTypeSelectorId) {
-      const input = document.getElementById(inputId);
-      const suggestions = document.getElementById(suggestionsId);
-      const assetTypeSelect = document.getElementById(assetTypeSelectorId);
-
-      input.addEventListener('input', debounce(() => {
-        const query = input.value.trim();
-        const assetType = assetTypeSelect.value;
-        if (query.length < 1) {
-          suggestions.style.display = 'none';
-          return;
-        }
-        fetch(`/api/tickers?query=${encodeURIComponent(query)}&asset_type=${assetType}&fuzzy=true`)
-          .then(response => response.json())
-          .then(data => {
-            suggestions.innerHTML = '';
-            if (data.length > 0) {
-              data.forEach(item => {
-                const div = document.createElement('div');
-                div.className = 'autocomplete-suggestion';
-                div.textContent = `${item.ticker} - ${item.source_ticker}`;
-                div.addEventListener('click', () => {
-                  input.value = item.ticker;
-                  suggestions.style.display = 'none';
-                });
-                suggestions.appendChild(div);
-              });
-              suggestions.style.display = 'block';
-              suggestions.style.left = `${input.offsetLeft}px`;
-              suggestions.style.top = `${input.offsetTop + input.offsetHeight}px`;
-              suggestions.style.width = `${input.offsetWidth}px`;
-            } else {
-              suggestions.style.display = 'none';
-            }
-          })
-          .catch(err => {
-            console.error('Error fetching ticker suggestions:', err);
-            suggestions.style.display = 'none';
-          });
-      }, 300));
-
-      document.addEventListener('click', (e) => {
-        if (!input.contains(e.target) && !suggestions.contains(e.target)) {
-          suggestions.style.display = 'none';
-        }
-      });
-
-      assetTypeSelect.addEventListener('change', () => {
-        input.value = '';
-        suggestions.style.display = 'none';
-      });
+    /* ----- DATA QUALITY ----- */
+    function fetchDataQuality() {
+      const contentDiv = document.getElementById('data-quality-content');
+      contentDiv.innerHTML = 'Loading...';
+      fetch('/api/data_quality')
+        .then(response => response.json())
+        .then(data => {
+          if (data.error) {
+            contentDiv.innerHTML = `<p class="message-error">Error: ${data.error}</p>`;
+            return;
+          }
+          contentDiv.innerHTML = `
+            <ul>
+              <li>Total Assets: ${data.total_assets ?? 'N/A'}</li>
+              <li>Total Asset Quotes: ${data.total_asset_quotes ?? 'N/A'}</li>
+              <li>Total OHLCV Records: ${(data.total_ohlcv_records ?? 0).toLocaleString()}</li>
+              <li>Assets Missing Name: ${data.missing_name_assets ?? 'N/A'}</li>
+            </ul>
+          `;
+        })
+        .catch(err => {
+          console.error('Error fetching data quality:', err);
+          contentDiv.innerHTML = `<p class="message-error">Error fetching data quality metrics.</p>`;
+        });
     }
 
+    /* ----- GLOBAL STATS ----- */
+    function fetchGlobalStats() {
+      fetch('/api/stats')
+        .then(response => response.json())
+        .then(data => {
+          if (data.error) throw new Error(data.error);
+          document.getElementById('total-assets').textContent = (data.total_assets ?? 0).toLocaleString();
+          document.getElementById('total-asset-quotes').textContent = (data.total_asset_quotes ?? 0).toLocaleString();
+          document.getElementById('total-derived-tickers').textContent = (data.total_derived_tickers ?? 0).toLocaleString();
+          document.getElementById('total-ohlcv-records').textContent = (data.total_ohlcv_records ?? 0).toLocaleString();
+          document.getElementById('db-size').textContent = data.db_size || 'N/A';
+          document.getElementById('api-requests-runtime').textContent = (data.api_requests_total_runtime ?? 0).toLocaleString();
+          document.getElementById('api-stats-total').textContent = (data.api_requests_total_runtime ?? 0).toLocaleString();
+          const dbSummaryBody = document.getElementById('db-summary-body');
+          dbSummaryBody.innerHTML = '';
+          if (data.table_records) {
+            for (const [table, records] of Object.entries(data.table_records)) {
+              dbSummaryBody.innerHTML += `
+                <tr>
+                  <td>${table.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</td>
+                  <td>${(records ?? 0).toLocaleString()}</td>
+                  <td><span class="badge badge-success">Up to date</span></td>
+                </tr>
+              `;
+            }
+          } else {
+            dbSummaryBody.innerHTML = '<tr><td colspan="3">No table data available.</td></tr>';
+          }
+        })
+        .catch(err => {
+          console.error('Error fetching stats:', err);
+          document.getElementById('total-assets').textContent = 'Error';
+          document.getElementById('db-size').textContent = 'Error';
+          document.getElementById('db-summary-body').innerHTML = `<tr><td colspan="3" class="message-error">Error loading summary.</td></tr>`;
+          document.getElementById('db-status').innerHTML = '<span class="status-dot error"></span> Error';
+        });
+    }
+
+    /* ----- DEBOUNCE UTILITY ----- */
     function debounce(func, wait) {
       let timeout;
       return function executedFunction(...args) {
@@ -742,190 +685,331 @@
       };
     }
 
+    /* ----- AUTOCOMPLETE SETUP ----- */
+    function setupAutocomplete(inputId, suggestionsId, assetTypeSelectorId, onSelectCallback = null) {
+      const input = document.getElementById(inputId);
+      const suggestionsContainer = document.getElementById(suggestionsId);
+      const assetTypeSelect = document.getElementById(assetTypeSelectorId);
+      input.addEventListener('input', debounce(() => {
+        const query = input.value.trim();
+        const assetType = assetTypeSelect ? assetTypeSelect.value : '';
+        if (query.length < 1) {
+          suggestionsContainer.innerHTML = '';
+          suggestionsContainer.style.display = 'none';
+          return;
+        }
+        let apiUrl = `/api/tickers?query=${encodeURIComponent(query)}&limit=10&fuzzy=true`;
+        if (assetType) { apiUrl += `&asset_type=${assetType}`; }
+        fetch(apiUrl)
+          .then(response => response.json())
+          .then(data => {
+            suggestionsContainer.innerHTML = '';
+            if (data && data.length > 0) {
+              data.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'autocomplete-suggestion';
+                let sourceDisplay = item.source_ticker && item.source_ticker !== item.ticker
+                  ? `<span class="suggestion-source">(${item.source_ticker})</span>`
+                  : '';
+                let typeBadgeClass = `badge-${(item.asset_type || 'unknown').toLowerCase()}`;
+                div.innerHTML = `
+                  <span class="suggestion-ticker">${item.ticker}</span>
+                  ${sourceDisplay}
+                  <span class="badge ${typeBadgeClass} suggestion-type">${item.asset_type || 'N/A'}</span>
+                `;
+                div.addEventListener('click', () => {
+                  input.value = item.ticker;
+                  suggestionsContainer.innerHTML = '';
+                  suggestionsContainer.style.display = 'none';
+                  if (onSelectCallback) { onSelectCallback(item); }
+                });
+                suggestionsContainer.appendChild(div);
+              });
+              suggestionsContainer.style.display = 'block';
+              suggestionsContainer.style.left = `${input.offsetLeft}px`;
+              suggestionsContainer.style.top = `${input.offsetTop + input.offsetHeight + 2}px`;
+              suggestionsContainer.style.width = `${input.offsetWidth}px`;
+            } else {
+              suggestionsContainer.style.display = 'none';
+            }
+          })
+          .catch(err => {
+            console.error('Error fetching ticker suggestions:', err);
+            suggestionsContainer.innerHTML = '';
+            suggestionsContainer.style.display = 'none';
+          });
+      }, 300));
+      document.addEventListener('click', (e) => {
+        if (!input.contains(e.target) && !suggestionsContainer.contains(e.target)) {
+          suggestionsContainer.style.display = 'none';
+        }
+      });
+      if (assetTypeSelect) {
+        assetTypeSelect.addEventListener('change', () => {
+          suggestionsContainer.innerHTML = '';
+          suggestionsContainer.style.display = 'none';
+        });
+      }
+    }
     setupAutocomplete('sync-ticker-input', 'sync-ticker-suggestions', 'sync-asset-type');
     setupAutocomplete('ticker-search-input', 'ticker-search-suggestions', 'asset-type-select');
 
-    // Force Sync for Ticker
-    document.getElementById('force-full-sync-btn').addEventListener('click', () => {
-      const ticker = document.getElementById('sync-ticker-input').value;
-      const assetType = document.getElementById('sync-asset-type').value;
-      fetch('/api/sync/full', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ticker: ticker, asset_type: assetType})
+    /* ----- GENERIC API CALL HANDLER ----- */
+    function handleApiCall(url, method, body, messageElementId, buttonElement) {
+      const messageElement = document.getElementById(messageElementId);
+      messageElement.textContent = 'Processing...';
+      if (buttonElement) buttonElement.disabled = true;
+      fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : null
       })
-      .then(response => response.json())
-      .then(data => {
-        document.getElementById('sync-message').textContent = data.message || data.error;
+      .then(response => response.json().then(data => ({ status: response.status, body: data })))
+      .then(({ status, body }) => {
+        if (status >= 200 && status < 300) {
+          messageElement.textContent = body.message || 'Operation successful.';
+          messageElement.className = 'message-success';
+        } else {
+          messageElement.textContent = `Error: ${body.error || 'Unknown error occurred.'}`;
+          messageElement.className = 'message-error';
+          console.error("API Error:", status, body);
+        }
       })
-      .catch(err => document.getElementById('sync-message').textContent = 'Error: ' + err);
-    });
-
-    document.getElementById('force-delta-sync-btn').addEventListener('click', () => {
-      const ticker = document.getElementById('sync-ticker-input').value;
-      const assetType = document.getElementById('sync-asset-type').value;
-      fetch('/api/sync/delta', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ticker: ticker, asset_type: assetType})
+      .catch(err => {
+        messageElement.textContent = `Network or processing error: ${err}`;
+        messageElement.className = 'message-error';
+        console.error('Fetch Error:', err);
       })
-      .then(response => response.json())
-      .then(data => {
-        document.getElementById('sync-message').textContent = data.message || data.error;
-      })
-      .catch(err => document.getElementById('sync-message').textContent = 'Error: ' + err);
-    });
-
-    // Global Sync buttons
-    document.getElementById('global-delta-sync-btn').addEventListener('click', () => {
-      fetch('/api/sync/delta', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({})
-      })
-      .then(response => response.json())
-      .then(data => {
-        alert(data.message || data.error);
-        location.reload();
+      .finally(() => {
+        if (buttonElement) buttonElement.disabled = false;
+        setTimeout(() => {
+          if (messageElement.textContent !== 'Processing...') {
+            messageElement.textContent = '';
+            messageElement.className = '';
+          }
+        }, 5000);
       });
+    }
+    document.getElementById('force-full-sync-btn').addEventListener('click', (e) => {
+      const ticker = document.getElementById('sync-ticker-input').value.trim();
+      const assetType = document.getElementById('sync-asset-type').value;
+      if (!ticker) {
+        document.getElementById('sync-message').textContent = 'Please enter a ticker.';
+        document.getElementById('sync-message').className = 'message-error';
+        return;
+      }
+      if (!confirm(`Perform FULL sync for ${ticker} (${assetType})? This might take time and overwrite data.`)) { return; }
+      handleApiCall('/api/sync/full', 'POST', { ticker, asset_type: assetType }, 'sync-message', e.target);
     });
-
-    document.getElementById('global-full-sync-btn').addEventListener('click', () => {
-      fetch('/api/sync/full', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({})
-      })
-      .then(response => response.json())
-      .then(data => {
-        alert(data.message || data.error);
-        location.reload();
-      });
+    document.getElementById('force-delta-sync-btn').addEventListener('click', (e) => {
+      const ticker = document.getElementById('sync-ticker-input').value.trim();
+      const assetType = document.getElementById('sync-asset-type').value;
+      if (!ticker) {
+        document.getElementById('sync-message').textContent = 'Please enter a ticker.';
+        document.getElementById('sync-message').className = 'message-error';
+        return;
+      }
+      handleApiCall('/api/sync/delta', 'POST', { ticker, asset_type: assetType }, 'sync-message', e.target);
     });
-
-    // Fetch Ticker Traffic
+    document.getElementById('global-delta-sync-btn').addEventListener('click', (e) => {
+      handleApiCall('/api/sync/delta', 'POST', { asset_type: 'STOCK' }, 'sync-message', e.target);
+      handleApiCall('/api/sync/delta', 'POST', { asset_type: 'CRYPTO' }, 'sync-message', null);
+      handleApiCall('/api/sync/delta', 'POST', { asset_type: 'CURRENCY' }, 'sync-message', null);
+      alert("Global Delta Sync initiated for Stocks, Crypto, and Currencies.");
+    });
+    document.getElementById('global-full-sync-btn').addEventListener('click', (e) => {
+      if (!confirm('Run Global Full Sync for ALL asset types? This can take a VERY long time and will overwrite existing data.')) { return; }
+      alert("Global Full Sync initiated. Check server logs for progress.");
+      handleApiCall('/api/sync/full', 'POST', { asset_type: 'STOCK' }, 'sync-message', e.target);
+    });
+    /* ----- TICKER TRAFFIC ----- */
     function fetchTickerTraffic() {
       fetch('/api/ticker_traffic')
         .then(response => response.json())
         .then(data => {
           const tbody = document.getElementById('ticker-traffic-body');
           tbody.innerHTML = '';
-          data.slice(0, 200).forEach((item, index) => {
-            tbody.innerHTML += `<tr>
-              <td>${index + 1}</td>
-              <td>${item.ticker}</td>
-              <td>${item.count}</td>
-            </tr>`;
-          });
+          if (data && data.length > 0) {
+            data.slice(0, 200).forEach((item, index) => {
+              let typeBadgeClass = `badge-${(item.asset_type || 'unknown').toLowerCase()}`;
+              tbody.innerHTML += `
+                <tr>
+                  <td>${index + 1}</td>
+                  <td>${item.ticker}</td>
+                  <td><span class="badge ${typeBadgeClass}">${item.asset_type}</span></td>
+                  <td>${(item.count ?? 0).toLocaleString()}</td>
+                </tr>
+              `;
+            });
+          } else {
+            tbody.innerHTML = '<tr><td colspan="4">No traffic data available.</td></tr>';
+          }
+        })
+        .catch(err => {
+          console.error("Error fetching ticker traffic:", err);
+          document.getElementById('ticker-traffic-body').innerHTML = '<tr><td colspan="4" class="message-error">Error loading traffic data.</td></tr>';
         });
     }
-    fetchTickerTraffic();
-    setInterval(fetchTickerTraffic, 60000);
-
-    // Unified Ticker Data Preview
+    /* ----- UNIFIED TICKER DATA PREVIEW & CHART ----- */
     let stockChart;
     let fullData = [];
     let displayData = [];
     let currentPage = 1;
     const rowsPerPage = 10;
-
+    function formatValue(value, isCurrency = true) {
+      if (value === null || value === undefined || value === "N/A" || value === "NOT_FOUND") return "N/A";
+      if (typeof value === 'number') {
+        if (isCurrency) {
+          if (Math.abs(value) >= 1) return '$' + value.toFixed(2);
+          if (Math.abs(value) >= 0.01) return '$' + value.toFixed(4);
+          return '$' + value.toPrecision(4);
+        } else { return value.toLocaleString(); }
+      }
+      return value;
+    }
     function fetchHistoricalData(ticker) {
-      // Call /api/unified with ticker
-      fetch(`/api/unified?ticker=${ticker}`)
+      const loadingIndicator = document.getElementById('loadingIndicator');
+      const metaContent = document.getElementById('meta-data-content');
+      const chartTitle = document.getElementById('chart-title');
+      const dataTypeSelect = document.getElementById('dataType');
+      const dataTableBody = document.getElementById('dataTableBody');
+      const paginationContainer = document.getElementById('pagination');
+      metaContent.innerHTML = 'Loading ticker details...';
+      chartTitle.textContent = 'Price Chart';
+      loadingIndicator.classList.remove('hidden');
+      if (stockChart) stockChart.destroy();
+      dataTableBody.innerHTML = '';
+      paginationContainer.innerHTML = '';
+      fullData = [];
+      displayData = [];
+      fetch(`/api/unified?ticker=${encodeURIComponent(ticker)}`)
         .then(response => {
-          if (!response.ok) throw new Error('Ticker not found');
+          if (!response.ok) {
+            return response.json().then(err => { throw new Error(err.error || `Ticker not found or API error (${response.status})`); });
+          }
           return response.json();
         })
         .then(data => {
           let metaHtml = '';
-          // Check if the returned asset is derived
-          if (data.asset_type && data.asset_type.toUpperCase() === "DERIVED") {
+          const isDerived = data.asset_type && data.asset_type.toUpperCase() === "DERIVED";
+          if (isDerived) {
             metaHtml = `
-              <p><strong>Ticker:</strong> ${data.ticker}</p>
-              <p><strong>Formula:</strong> ${data.formula}</p>
-              <p><strong>Asset Type:</strong> DERIVED</p>
-              <p><strong>Latest Price:</strong> ${data.latest_price}</p>
-              <p><strong>Context:</strong> ${JSON.stringify(data.latest_context)}</p>
+              <div class="meta-data-item"><strong>Ticker:</strong> ${data.ticker} <span class="badge badge-derived">DERIVED</span></div>
+              <div class="meta-data-item"><strong>Formula:</strong> ${data.formula}</div>
+              <div class="meta-data-item"><strong>Latest Value:</strong> ${formatValue(data.latest_price)}</div>
+              <div class="meta-data-item"><strong>Calculated:</strong> ${new Date(data.latest_cache_timestamp).toLocaleString()}</div>
+              <div class="meta-data-item" style="grid-column: 1 / -1;"><strong>Context:</strong> <code>${JSON.stringify(data.latest_context)}</code></div>
             `;
-            // Force chart to use derived_value and disable dataType selector
-            document.getElementById('dataType').value = 'derived_value';
-            document.getElementById('dataType').disabled = true;
+            dataTypeSelect.value = 'value';
+            Array.from(dataTypeSelect.options).forEach(opt => { opt.disabled = (opt.value !== 'value'); });
           } else {
+            let typeBadgeClass = `badge-${(data.from_asset?.asset_type || 'unknown').toLowerCase()}`;
             metaHtml = `
-              <p><strong>Ticker:</strong> ${data.ticker}</p>
-              <p><strong>Source Ticker:</strong> ${data.source_ticker}</p>
-              <p><strong>Data Source:</strong> ${data.data_source}</p>
-              <p><strong>Asset Type:</strong> ${data.from_asset.asset_type}</p>
-              <p><strong>Asset Symbol:</strong> ${data.from_asset.symbol}</p>
-              <p><strong>Quote Currency:</strong> ${data.to_asset.symbol}</p>
-              <p><strong>Latest Price (Cache):</strong> ${data.latest_cache.price} <small>at ${data.latest_cache.timestamp}</small></p>
+              <div class="meta-data-item"><strong>Ticker:</strong> ${data.ticker} <span class="badge ${typeBadgeClass}">${data.from_asset?.asset_type}</span></div>
+              <div class="meta-data-item"><strong>Source Ticker:</strong> ${data.source_ticker || 'N/A'}</div>
+              <div class="meta-data-item"><strong>Data Source:</strong> ${data.data_source || 'N/A'}</div>
+              <div class="meta-data-item"><strong>Base Asset:</strong> ${data.from_asset?.symbol || 'N/A'}</div>
+              <div class="meta-data-item"><strong>Quote Asset:</strong> ${data.to_asset?.symbol || 'N/A'}</div>
+              <div class="meta-data-item"><strong>Latest Price:</strong> ${formatValue(data.latest_price)}</div>
+              <div class="meta-data-item"><strong>Cached Time:</strong> ${data.latest_cache_timestamp ? new Date(data.latest_cache_timestamp).toLocaleString() : 'N/A'}</div>
             `;
-            document.getElementById('dataType').disabled = false;
+            Array.from(dataTypeSelect.options).forEach(opt => { opt.disabled = (opt.value === 'derived_value'); });
+            if (dataTypeSelect.value === 'derived_value') { dataTypeSelect.value = 'value'; }
           }
-          document.getElementById('meta-data-content').innerHTML = metaHtml;
-          document.getElementById('chart-title').textContent = `${data.ticker} Price Chart`;
-
-          // Process historical data:
-          // For derived tickers, the API returns objects with date and derived_value.
-          fullData = data.historical_data.map(item => {
-            if (data.asset_type && data.asset_type.toUpperCase() === "DERIVED") {
-              item.close = item.derived_value;
-              item.open = item.derived_value;
-              item.high = item.derived_value;
-              item.low = item.derived_value;
-              item.volume = 0;
-              item.change = 0;
-            } else {
-              if (item.open && item.close) {
-                item.change = 0;
-              }
-            }
+          metaContent.innerHTML = metaHtml;
+          chartTitle.textContent = `${data.ticker} Chart`;
+          if (!data.historical_data || data.historical_data.length === 0) {
+            console.warn("No historical data received for ticker:", ticker);
+            loadingIndicator.classList.add('hidden');
+            dataTableBody.innerHTML = '<tr><td colspan="7">No historical data available for this ticker.</td></tr>';
+            const ctx = document.getElementById('stockChart').getContext('2d');
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#6b7280';
+            ctx.fillText("No historical data available", ctx.canvas.width / 2, ctx.canvas.height / 2);
+            updateStats();
+            return;
+          }
+          fullData = data.historical_data.map((item, index, arr) => {
+            item.open = item.open !== null ? Number(item.open) : null;
+            item.high = item.high !== null ? Number(item.high) : null;
+            item.low = item.low !== null ? Number(item.low) : null;
+            item.close = item.close !== null ? Number(item.close) : null;
+            item.value = item.value !== null ? Number(item.value) : null;
+            item.volume = item.volume !== null ? Number(item.volume) : null;
+            if (index > 0) {
+              const prevClose = arr[index - 1].value;
+              item.change = (prevClose && item.value !== null) ? ((item.value - prevClose) / prevClose * 100) : 0;
+            } else { item.change = 0; }
             return item;
           });
           fullData.sort((a, b) => new Date(a.date) - new Date(b.date));
-          applyTimeframe(30);
+          applyTimeframe(document.querySelector('.timeframe-button.active')?.dataset.days || 30);
           updateChart();
           updateStats();
           updateDataTable();
         })
         .catch(err => {
-          document.getElementById('meta-data-content').innerHTML = `<p style="color: red;">${err.message}</p>`;
+          console.error('Error fetching historical data:', err);
+          metaContent.innerHTML = `<p class="message-error">Error: ${err.message}</p>`;
+          chartTitle.textContent = 'Error Loading Chart';
           if (stockChart) stockChart.destroy();
-          document.getElementById('dataTableBody').innerHTML = '';
+          loadingIndicator.classList.add('hidden');
+          dataTableBody.innerHTML = `<tr><td colspan="7" class="message-error">Error loading data.</td></tr>`;
           document.getElementById('pagination').innerHTML = '';
+          document.getElementById('periodHigh').textContent = 'N/A';
+          document.getElementById('periodLow').textContent = 'N/A';
+          document.getElementById('avgVolume').textContent = 'N/A';
+          document.getElementById('periodChange').textContent = 'N/A';
+          document.getElementById('periodChange').className = 'stat-value';
         });
     }
-
-    function applyTimeframe(days) {
-      const cutoffDate = new Date();
-      if (days !== 'all') {
-        cutoffDate.setDate(cutoffDate.getDate() - days);
-        const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
-        displayData = fullData.filter(item => item.date >= cutoffDateStr);
-      } else {
-        displayData = [...fullData];
+    function applyTimeframe(daysOrLabel) {
+      const days = daysOrLabel === 'all' ? Infinity : parseInt(daysOrLabel);
+      if (isNaN(days)) {
+        console.error("Invalid timeframe:", daysOrLabel);
+        return;
       }
+      if (days === Infinity) { displayData = [...fullData]; }
+      else {
+        const cutoffDate = new Date();
+        cutoffDate.setHours(0, 0, 0, 0);
+        cutoffDate.setDate(cutoffDate.getDate() - days);
+        displayData = fullData.filter(item => new Date(item.date) >= cutoffDate);
+      }
+      currentPage = 1;
     }
-
     function updateChart() {
       const dataType = document.getElementById('dataType').value;
       const ctx = document.getElementById('stockChart').getContext('2d');
+      const loadingIndicator = document.getElementById('loadingIndicator');
       if (stockChart) stockChart.destroy();
-      document.getElementById('loadingIndicator').classList.remove('hidden');
+      if (!displayData || displayData.length === 0) {
+        loadingIndicator.classList.add('hidden');
+        ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#6b7280';
+        ctx.fillText("No data for selected timeframe", ctx.canvas.width / 2, ctx.canvas.height / 2);
+        return;
+      }
+      loadingIndicator.classList.remove('hidden');
+      const chartValues = displayData.map(item => item[dataType] !== undefined && item[dataType] !== null ? Number(item[dataType]) : null);
+      const labels = displayData.map(item => item.date);
       setTimeout(() => {
         stockChart = new Chart(ctx, {
           type: 'line',
           data: {
-            labels: displayData.map(item => item.date),
+            labels: labels,
             datasets: [{
-              label: dataType.charAt(0).toUpperCase() + dataType.slice(1) + (dataType === 'derived_value' ? ' (Derived)' : ' Price'),
-              data: displayData.map(item => item[dataType]),
+              label: dataType.charAt(0).toUpperCase() + dataType.slice(1),
+              data: chartValues,
               borderColor: '#2563eb',
               backgroundColor: 'rgba(37, 99, 235, 0.1)',
               fill: true,
               tension: 0.1,
-              pointRadius: displayData.length > 100 ? 0 : 2,
-              pointHoverRadius: 4
+              pointRadius: displayData.length > 200 ? 0 : (displayData.length > 50 ? 1 : 2),
+              pointHoverRadius: 4,
+              spanGaps: true,
             }]
           },
           options: {
@@ -933,156 +1017,204 @@
             maintainAspectRatio: false,
             interaction: { intersect: false, mode: 'index' },
             scales: {
-              x: { type: 'time', time: { unit: getTimeUnit(displayData.length) }, ticks: { maxRotation: 0, autoSkip: true } },
-              y: { beginAtZero: false }
+              x: {
+                type: 'time',
+                time: {
+                  unit: getTimeUnit(displayData.length),
+                  tooltipFormat: 'MMM dd, yyyy',
+                  displayFormats: {
+                    day: 'MMM dd',
+                    week: 'MMM dd',
+                    month: 'MMM yyyy',
+                    quarter: '[Q]Q yyyy',
+                    year: 'yyyy'
+                  }
+                },
+                ticks: { maxRotation: 0, autoSkip: true, autoSkipPadding: 15 }
+              },
+              y: {
+                beginAtZero: false,
+                ticks: { callback: value => formatValue(value) }
+              }
             },
             plugins: {
               tooltip: {
                 callbacks: {
-                  label: context => `${context.dataset.label}: $${context.raw.toFixed(2)}`,
+                  label: context => `${context.dataset.label}: ${formatValue(context.raw)}`,
                   afterBody: tooltipItems => {
                     const item = displayData[tooltipItems[0].dataIndex];
-                    return [
-                      `Open: $${item.open.toFixed(2)}`,
-                      `High: $${item.high.toFixed(2)}`,
-                      `Low: $${item.low.toFixed(2)}`,
-                      `Close: $${item.close.toFixed(2)}`,
-                      `Volume: ${(item.volume ?? 0).toLocaleString()}`
+                    if (!item) return [];
+                    const isDerived = item.open === null && item.high === null && item.low === null && item.volume === null;
+                    return isDerived ? [`Value: ${formatValue(item.value)}`] : [
+                      `Open: ${formatValue(item.open)}`,
+                      `High: ${formatValue(item.high)}`,
+                      `Low: ${formatValue(item.low)}`,
+                      `Close: ${formatValue(item.close)}`,
+                      `Volume: ${formatValue(item.volume, false)}`
                     ];
                   }
                 }
               },
-              legend: { display: true }
+              legend: { display: false }
             }
           }
         });
-        document.getElementById('loadingIndicator').classList.add('hidden');
-      }, 100);
+        loadingIndicator.classList.add('hidden');
+      }, 50);
     }
-
     function getTimeUnit(dataLength) {
-      if (dataLength <= 31) return 'day';
-      if (dataLength <= 90) return 'week';
-      if (dataLength <= 365) return 'month';
+      if (dataLength <= 62) return 'day';
+      if (dataLength <= 180) return 'week';
+      if (dataLength <= 1095) return 'month';
       return 'quarter';
     }
-
     function updateStats() {
-      if (displayData.length === 0) return;
-      const maxPrice = Math.max(...displayData.map(item => item.high));
-      const minPrice = Math.min(...displayData.map(item => item.low));
-      const avgVolume = Math.round(displayData.reduce((sum, item) => sum + item.volume, 0) / displayData.length);
-      const firstPrice = displayData[0].open;
-      const lastPrice = displayData[displayData.length - 1].close;
-      const periodChange = ((lastPrice - firstPrice) / firstPrice * 100).toFixed(2);
-      document.getElementById('periodHigh').textContent = '$' + maxPrice.toFixed(2);
-      document.getElementById('periodLow').textContent = '$' + minPrice.toFixed(2);
-      document.getElementById('avgVolume').textContent = avgVolume.toLocaleString();
+      if (!displayData || displayData.length === 0) {
+        document.getElementById('periodHigh').textContent = 'N/A';
+        document.getElementById('periodLow').textContent = 'N/A';
+        document.getElementById('avgVolume').textContent = 'N/A';
+        document.getElementById('periodChange').textContent = 'N/A';
+        document.getElementById('periodChange').className = 'stat-value';
+        return;
+      }
+      const validHighs = displayData.map(item => item.high).filter(v => v !== null);
+      const validLows = displayData.map(item => item.low).filter(v => v !== null);
+      const validVolumes = displayData.map(item => item.volume).filter(v => v !== null);
+      const validValues = displayData.map(item => item.value).filter(v => v !== null);
+      const maxPrice = validHighs.length > 0 ? Math.max(...validHighs) : null;
+      const minPrice = validLows.length > 0 ? Math.min(...validLows) : null;
+      const avgVolume = validVolumes.length > 0 ? validVolumes.reduce((sum, v) => sum + v, 0) / validVolumes.length : null;
+      const firstValue = validValues.length > 0 ? validValues[0] : null;
+      const lastValue = validValues.length > 0 ? validValues[validValues.length - 1] : null;
+      let periodChange = null;
+      if (firstValue !== null && lastValue !== null && firstValue !== 0) {
+        periodChange = ((lastValue - firstValue) / firstValue * 100);
+      }
+      document.getElementById('periodHigh').textContent = formatValue(maxPrice);
+      document.getElementById('periodLow').textContent = formatValue(minPrice);
+      document.getElementById('avgVolume').textContent = formatValue(avgVolume, false);
       const changeElement = document.getElementById('periodChange');
-      changeElement.textContent = periodChange + '%';
-      changeElement.className = 'stat-value ' + (periodChange >= 0 ? 'positive' : 'negative');
+      if (periodChange !== null) {
+        changeElement.textContent = periodChange.toFixed(2) + '%';
+        changeElement.className = 'stat-value ' + (periodChange >= 0 ? 'positive' : 'negative');
+      } else {
+        changeElement.textContent = 'N/A';
+        changeElement.className = 'stat-value';
+      }
     }
-
     function updateDataTable() {
       const tableBody = document.getElementById('dataTableBody');
       tableBody.innerHTML = '';
+      if (!displayData || displayData.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="7">No data for selected timeframe.</td></tr>';
+        updatePagination(0);
+        return;
+      }
       const displayDataReversed = [...displayData].reverse();
+      const totalItems = displayDataReversed.length;
       const startIndex = (currentPage - 1) * rowsPerPage;
-      const endIndex = Math.min(startIndex + rowsPerPage, displayDataReversed.length);
-      updatePagination(displayDataReversed.length);
+      const endIndex = Math.min(startIndex + rowsPerPage, totalItems);
       const pageData = displayDataReversed.slice(startIndex, endIndex);
       pageData.forEach(item => {
         const row = document.createElement('tr');
+        const changePercent = item.change !== null ? item.change.toFixed(2) : 0;
+        const changeClass = changePercent > 0 ? 'positive' : (changePercent < 0 ? 'negative' : '');
+        const displayClose = item.value !== null ? formatValue(item.value) : 'N/A';
+        const displayOpen = item.open !== null ? formatValue(item.open) : 'N/A';
+        const displayHigh = item.high !== null ? formatValue(item.high) : 'N/A';
+        const displayLow = item.low !== null ? formatValue(item.low) : 'N/A';
+        const displayVolume = item.volume !== null ? formatValue(item.volume, false) : 'N/A';
         row.innerHTML = `
-          <td>${item.date}</td>
-          <td>$${item.open.toFixed(2)}</td>
-          <td>$${item.high.toFixed(2)}</td>
-          <td>$${item.low.toFixed(2)}</td>
-          <td>$${item.close.toFixed(2)}</td>
-          <td>${(item.volume ?? 0).toLocaleString()}</td>
-          <td class="${item.change >= 0 ? 'positive' : 'negative'}">${item.change}%</td>
+          <td>${item.date.split('T')[0]}</td>
+          <td>${displayOpen}</td>
+          <td>${displayHigh}</td>
+          <td>${displayLow}</td>
+          <td>${displayClose}</td>
+          <td>${displayVolume}</td>
+          <td class="${changeClass}">${changePercent}%</td>
         `;
         tableBody.appendChild(row);
       });
+      updatePagination(totalItems);
     }
-
     function updatePagination(totalItems) {
       const totalPages = Math.ceil(totalItems / rowsPerPage);
       const paginationContainer = document.getElementById('pagination');
       paginationContainer.innerHTML = '';
       if (totalPages <= 1) return;
-      const prevButton = document.createElement('button');
-      prevButton.textContent = '«';
-      prevButton.disabled = currentPage === 1;
-      prevButton.addEventListener('click', () => {
-        if (currentPage > 1) {
-          currentPage--;
+      const createButton = (text, pageNum, isDisabled = false, isActive = false) => {
+        const button = document.createElement('button');
+        button.innerHTML = text;
+        button.disabled = isDisabled;
+        if (isActive) button.classList.add('active');
+        button.addEventListener('click', () => {
+          currentPage = pageNum;
           updateDataTable();
+        });
+        return button;
+      };
+      paginationContainer.appendChild(createButton('&laquo;', currentPage - 1, currentPage === 1));
+      const maxButtonsToShow = 5;
+      let startPage = Math.max(1, currentPage - Math.floor(maxButtonsToShow / 2));
+      let endPage = Math.min(totalPages, startPage + maxButtonsToShow - 1);
+      if (endPage - startPage + 1 < maxButtonsToShow) {
+        startPage = Math.max(1, endPage - maxButtonsToShow + 1);
+      }
+      if (startPage > 1) {
+        paginationContainer.appendChild(createButton('1', 1));
+        if (startPage > 2) {
+          const ellipsis = document.createElement('span');
+          ellipsis.textContent = '...';
+          ellipsis.style.padding = '5px';
+          paginationContainer.appendChild(ellipsis);
         }
-      });
-      paginationContainer.appendChild(prevButton);
-      const maxButtons = 5;
-      let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
-      let endPage = Math.min(totalPages, startPage + maxButtons - 1);
-      if (endPage - startPage + 1 < maxButtons) {
-        startPage = Math.max(1, endPage - maxButtons + 1);
       }
       for (let i = startPage; i <= endPage; i++) {
-        const pageButton = document.createElement('button');
-        pageButton.textContent = i;
-        if (i === currentPage) pageButton.classList.add('active');
-        pageButton.addEventListener('click', () => {
-          currentPage = i;
-          updateDataTable();
-        });
-        paginationContainer.appendChild(pageButton);
+        paginationContainer.appendChild(createButton(i, i, false, i === currentPage));
       }
-      const nextButton = document.createElement('button');
-      nextButton.textContent = '»';
-      nextButton.disabled = currentPage === totalPages;
-      nextButton.addEventListener('click', () => {
-        if (currentPage < totalPages) {
-          currentPage++;
-          updateDataTable();
+      if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+          const ellipsis = document.createElement('span');
+          ellipsis.textContent = '...';
+          ellipsis.style.padding = '5px';
+          paginationContainer.appendChild(ellipsis);
         }
-      });
-      paginationContainer.appendChild(nextButton);
+        paginationContainer.appendChild(createButton(totalPages, totalPages));
+      }
+      paginationContainer.appendChild(createButton('&raquo;', currentPage + 1, currentPage === totalPages));
     }
-
     document.addEventListener('DOMContentLoaded', () => {
-      // Load initial ticker data for default ticker (e.g., AAPL)
+      updateCacheInfo();
+      fetchGlobalStats();
+      fetchTickerTraffic();
+      fetchDataQuality();
+      // Load default ticker ("AAPL")
       fetchHistoricalData('AAPL');
-
       document.getElementById('ticker-search-btn').addEventListener('click', () => {
         const ticker = document.getElementById('ticker-search-input').value.trim();
-        if (ticker) {
-          currentPage = 1;
-          fetchHistoricalData(ticker);
-        }
+        if (ticker) { fetchHistoricalData(ticker); }
       });
-
+      document.getElementById('ticker-search-input').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') { document.getElementById('ticker-search-btn').click(); }
+      });
       document.getElementById('dataType').addEventListener('change', () => {
-        updateChart();
-        updateStats();
-        updateDataTable();
+        if (displayData && displayData.length > 0) { updateChart(); }
       });
-
       document.querySelectorAll('.timeframe-button').forEach(button => {
         button.addEventListener('click', function() {
-          currentPage = 1;
           document.querySelectorAll('.timeframe-button').forEach(btn => btn.classList.remove('active'));
           this.classList.add('active');
-          const days = this.dataset.days;
-          if (days === 'all') {
-            displayData = [...fullData];
-          } else {
-            applyTimeframe(parseInt(days));
+          const timeframe = this.dataset.days;
+          applyTimeframe(timeframe);
+          if (fullData && fullData.length > 0) {
+            updateChart();
+            updateStats();
+            updateDataTable();
           }
-          updateChart();
-          updateStats();
-          updateDataTable();
         });
       });
+      setInterval(updateCacheInfo, 60000);
+      setInterval(fetchTickerTraffic, 60000);
     });
   </script>
 </body>

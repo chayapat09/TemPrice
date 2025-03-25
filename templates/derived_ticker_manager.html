@@ -1,651 +1,1074 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Derived Ticker Manager</title>
-  <style>
-    * {
-      box-sizing: border-box;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    }
-    body {
-      margin: 0;
-      padding: 20px;
-      background: #f1f5f9;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
-    .container {
-      width: 100%;
-      max-width: 600px;
-      background: white;
-      border-radius: 8px;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-      overflow: hidden;
-      margin-bottom: 20px;
-    }
-    .header {
-      background: #f8fafc;
-      padding: 20px;
-      border-bottom: 1px solid #e2e8f0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .close-btn {
-      width: 30px;
-      height: 30px;
-      border-radius: 50%;
-      background: #f1f5f9;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .close-btn:hover {
-      background: #e2e8f0;
-    }
-    .body {
-      padding: 20px;
-    }
-    .form-group {
-      margin-bottom: 20px;
-    }
-    .form-label {
-      display: block;
-      font-weight: 600;
-      margin-bottom: 8px;
-      color: #334155;
-    }
-    .form-control {
-      width: 100%;
-      padding: 10px;
-      border: 1px solid #cbd5e1;
-      border-radius: 4px;
-      font-size: 14px;
-    }
-    .form-control:focus {
-      outline: none;
-      border-color: #3b82f6;
-      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
-    }
-    .search-box {
-      position: relative;
-      margin-bottom: 8px;
-    }
-    .search-box input {
-      width: 100%;
-      padding: 6px 10px;
-      border: 1px solid #cbd5e1;
-      border-radius: 4px;
-      font-size: 12px;
-    }
-    .search-box input:focus {
-      outline: none;
-      border-color: #3b82f6;
-    }
-    .formula-builder {
-      display: flex;
-      background: #f8fafc;
-      border: 1px solid #cbd5e1;
-      border-radius: 4px;
-      padding: 15px;
-      gap: 15px;
-      height: 250px;
-    }
-    .builder-section {
-      flex: 1;
-      background: white;
-      border: 1px solid #cbd5e1;
-      border-radius: 4px;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-    }
-    .section-header {
-      padding: 8px;
-      font-size: 12px;
-      font-weight: 600;
-      color: #64748b;
-      background: #f8fafc;
-      border-bottom: 1px solid #e2e8f0;
-    }
-    .section-content {
-      flex: 1;
-      padding: 8px;
-      overflow-y: auto;
-    }
-    .ticker-item, .operator-item, .constant-item {
-      margin-bottom: 5px;
-      padding: 6px 10px;
-      background: #f1f5f9;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .ticker-item:hover, .operator-item:hover, .constant-item:hover {
-      background: #e2e8f0;
-    }
-    .operator-item {
-      display: inline-block;
-      width: calc(50% - 5px);
-      text-align: center;
-      margin-right: 5px;
-      margin-bottom: 10px;
-      height: 40px;
-      line-height: 28px;
-      font-size: 16px;
-    }
-    .operator-item:nth-child(even) {
-      margin-right: 0;
-    }
-    .selected {
-      background: #3b82f6 !important;
-      color: white;
-    }
-    .formula-preview {
-      position: relative;
-      background: white;
-      border: 1px solid #cbd5e1;
-      border-radius: 4px;
-      padding: 10px;
-      min-height: 42px;
-      margin-top: 5px;
-      color: #334155;
-      display: flex;
-      align-items: center;
-    }
-    .formula-tokens {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 5px;
-      align-items: center;
-    }
-    .formula-token {
-      background: #f1f5f9;
-      border: 1px solid #e2e8f0;
-      border-radius: 4px;
-      padding: 5px 10px;
-      font-size: 14px;
-      display: flex;
-      align-items: center;
-    }
-    .token-close {
-      margin-left: 8px;
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      background: #cbd5e1;
-      color: #64748b;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      font-size: 10px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .token-close:hover {
-      background: #94a3b8;
-      color: white;
-    }
-    .token-ticker {
-      background: #dbeafe;
-      border-color: #bfdbfe;
-    }
-    .token-operator {
-      background: #e0f2fe;
-      border-color: #bae6fd;
-    }
-    .token-constant {
-      background: #f0fdf4;
-      border-color: #dcfce7;
-    }
-    .clear-all {
-      position: absolute;
-      right: 10px;
-      top: 50%;
-      transform: translateY(-50%);
-      background: #f1f5f9;
-      border: 1px solid #e2e8f0;
-      color: #64748b;
-      border-radius: 4px;
-      padding: 4px 8px;
-      font-size: 12px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .clear-all:hover {
-      background: #e2e8f0;
-    }
-    .formula-validation {
-      margin-top: 5px;
-      height: 20px;
-      color: #10b981;
-      font-size: 12px;
-      display: flex;
-      align-items: center;
-    }
-    .formula-validation.error {
-      color: #ef4444;
-    }
-    .validation-icon {
-      margin-right: 5px;
-    }
-    .preview-result {
-      background: #f8fafc;
-      border: 1px solid #cbd5e1;
-      border-radius: 4px;
-      padding: 15px;
-      margin-top: 15px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .result-label {
-      font-weight: 600;
-      color: #334155;
-    }
-    .result-value {
-      font-size: 18px;
-      font-weight: 600;
-      color: #334155;
-    }
-    .footer {
-      padding: 15px 20px;
-      text-align: right;
-      border-top: 1px solid #e2e8f0;
-      background: #f8fafc;
-    }
-    .btn {
-      padding: 8px 16px;
-      border-radius: 4px;
-      font-weight: 500;
-      cursor: pointer;
-      border: none;
-      transition: all 0.2s;
-    }
-    .btn-default {
-      background: white;
-      border: 1px solid #cbd5e1;
-      color: #64748b;
-      margin-right: 10px;
-    }
-    .btn-default:hover {
-      background: #f1f5f9;
-    }
-    .btn-primary {
-      background: #3b82f6;
-      color: white;
-    }
-    .btn-primary:hover {
-      background: #2563eb;
-    }
-    .derived-list {
-      margin-top: 20px;
-    }
-    .derived-item {
-      padding: 10px;
-      border: 1px solid #e2e8f0;
-      border-radius: 4px;
-      margin-bottom: 10px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .derived-item button {
-      margin-left: 5px;
-    }
-    .notification {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: #10b981;
-      color: white;
-      padding: 12px 20px;
-      border-radius: 4px;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-      display: none;
-      animation: slideIn 0.3s ease;
-    }
-    @keyframes slideIn {
-      from {
-        transform: translateY(-20px);
-        opacity: 0;
-      }
-      to {
-        transform: translateY(0);
-        opacity: 1;
-      }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Derived Ticker Manager</title>
+    <style>
+         /* (Keep existing CSS from the original derived_ticker_manager.html) */
+         :root {
+              --primary: #3b82f6;
+              --secondary: #64748b;
+              --danger: #ef4444;
+              --success: #10b981;
+              --light: #f1f5f9;
+              --border: #cbd5e1;
+              --white: #ffffff;
+              --dark: #334155;
+         }
+        * {
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #f1f5f9;
+            /* Removed flex centering to allow scrolling with multiple containers */
+        }
+        .container {
+            width: 100%;
+            max-width: 700px; /* Increased width */
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            margin: 20px auto; /* Center container */
+        }
+         .container-list {
+             max-width: 700px;
+             margin: 20px auto;
+             background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+         }
+        .header {
+            background: #f8fafc;
+            padding: 15px 20px; /* Adjusted padding */
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+         .header h2 {
+             margin: 0;
+             font-size: 1.25rem;
+             color: var(--dark);
+         }
+        .close-btn { /* Style for a potential close button if needed */
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #e2e8f0;
+            color: var(--secondary);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 14px;
+            border: none;
+        }
+        .close-btn:hover {
+            background: #cbd5e1;
+        }
+        .body {
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #334155;
+            font-size: 0.9rem;
+        }
+        .form-control {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .form-control:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+        }
+         .input-hint {
+            font-size: 0.75rem;
+            color: var(--secondary);
+            margin-top: 4px;
+         }
+
+        .search-box {
+            position: relative; /* Needed for suggestions */
+            margin-bottom: 8px;
+        }
+        .search-box input {
+            width: 100%;
+            padding: 8px 10px; /* Adjusted padding */
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            font-size: 13px; /* Adjusted size */
+        }
+        .search-box input:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+        .formula-builder {
+            display: flex;
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 15px;
+            gap: 15px;
+            min-height: 250px; /* Ensure minimum height */
+            flex-wrap: wrap; /* Allow wrapping on smaller screens */
+        }
+        .builder-section {
+            flex: 1;
+            min-width: 180px; /* Minimum width before wrapping */
+            background: white;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            max-height: 250px; /* Limit height */
+        }
+        .section-header {
+            padding: 8px 10px; /* Adjusted padding */
+            font-size: 12px;
+            font-weight: 600;
+            color: #64748b;
+            background: #f8fafc;
+            border-bottom: 1px solid #e2e8f0;
+            text-align: center;
+        }
+        .section-content {
+            flex-grow: 1; /* Allow content to take available space */
+            padding: 8px;
+            overflow-y: auto;
+        }
+        .ticker-item, .operator-item, .constant-item {
+            margin-bottom: 5px;
+            padding: 6px 10px;
+            background: #f1f5f9;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 0.85rem; /* Adjusted size */
+            display: block; /* Make items block level */
+            border: 1px solid transparent; /* Add border for consistency */
+        }
+        .ticker-item:hover, .operator-item:hover, .constant-item:hover {
+            background: #e2e8f0;
+            border-color: #d1d5db;
+        }
+        .ticker-item .source {
+             font-size: 0.8em;
+             color: var(--secondary);
+             margin-left: 5px;
+        }
+        .ticker-item .type {
+             float: right;
+             font-size: 0.8em;
+             padding: 2px 4px;
+             border-radius: 3px;
+        }
+         .type-stock { background-color: #dbeafe; color: #1e40af; }
+         .type-crypto { background-color: #fef3c7; color: #92400e; }
+         .type-currency { background-color: #d1fae5; color: #065f46; }
+         .type-derived { background-color: #e5e7eb; color: #4b5563; }
+
+        .operators-grid {
+             display: grid;
+             grid-template-columns: repeat(2, 1fr);
+             gap: 8px;
+        }
+        .operator-item {
+            /* display: inline-block; Remove inline-block */
+            width: 100%; /* Full width in grid */
+            text-align: center;
+            /* margin-right: 5px; Removed */
+            margin-bottom: 0; /* Removed */
+            height: 36px; /* Adjusted height */
+            line-height: 24px; /* Adjusted line-height */
+            font-size: 16px;
+            font-weight: bold;
+        }
+        /* .operator-item:nth-child(even) { margin-right: 0; } Removed */
+
+         .constants-list button {
+             width: 100%;
+             text-align: left;
+             margin-bottom: 5px;
+         }
+         .add-constant-input {
+             display: flex;
+             gap: 5px;
+             margin-top: 10px;
+         }
+        .add-constant-input input {
+             flex-grow: 1;
+             padding: 6px;
+             border: 1px solid #cbd5e1;
+             border-radius: 4px;
+             font-size: 13px;
+         }
+        .add-constant-input button {
+             padding: 6px 10px;
+             font-size: 12px;
+         }
+
+        .selected { /* Used for formula tokens, not builder items */
+           /* background: #3b82f6 !important;
+           color: white; */
+        }
+        .formula-preview {
+            position: relative;
+            background: white;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 10px 45px 10px 10px; /* Add padding for clear button */
+            min-height: 42px;
+            margin-top: 5px;
+            color: #334155;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap; /* Allow tokens to wrap */
+            gap: 5px; /* Space between tokens */
+        }
+        .formula-placeholder {
+             color: #9ca3af;
+             font-style: italic;
+        }
+        .formula-tokens { /* Removed extra div, using formula-preview directly */
+            /* display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            align-items: center; */
+        }
+        .formula-token {
+            background: #f1f5f9;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            padding: 5px 8px; /* Adjusted padding */
+            font-size: 14px;
+            display: inline-flex; /* Use inline-flex */
+            align-items: center;
+            white-space: nowrap;
+        }
+        .token-close {
+            margin-left: 8px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #cbd5e1;
+            color: #64748b;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 10px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            line-height: 16px; /* Center the 'x' vertically */
+        }
+        .token-close:hover {
+            background: #94a3b8;
+            color: white;
+        }
+        .token-ticker { background: #dbeafe; border-color: #bfdbfe; }
+        .token-operator { background: #e0f2fe; border-color: #bae6fd; font-weight: bold; }
+        .token-constant { background: #f0fdf4; border-color: #dcfce7; }
+        .token-paren { background: #f3e8ff; border-color: #e9d5ff; } /* Style for parentheses */
+
+        .clear-all {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #f8fafc; /* Lighter background */
+            border: 1px solid #e2e8f0; /* Lighter border */
+            color: #64748b;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 11px; /* Smaller font */
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .clear-all:hover {
+            background: #e2e8f0;
+            border-color: #cbd5e1;
+        }
+        .formula-validation {
+            margin-top: 5px;
+            min-height: 20px; /* Prevent layout shift */
+            color: var(--success);
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+        }
+        .formula-validation.error { color: var(--danger); }
+        .formula-validation.info { color: var(--secondary); }
+        .validation-icon { margin-right: 5px; } /* Icons can be added via JS */
+
+        .preview-result {
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 10px 15px; /* Adjusted padding */
+            margin-top: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            min-height: 46px; /* Consistent height */
+        }
+        .result-label {
+            font-weight: 600;
+            color: #334155;
+            font-size: 0.9rem;
+        }
+        .result-value {
+            font-size: 1rem; /* Adjusted size */
+            font-weight: 600;
+            color: #334155;
+        }
+        .result-value.loading { color: var(--secondary); font-style: italic; }
+        .result-value.error { color: var(--danger); font-size: 0.9rem;}
+
+        .footer {
+            padding: 15px 20px;
+            text-align: right;
+            border-top: 1px solid #e2e8f0;
+            background: #f8fafc;
+        }
+        .btn {
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: 500;
+            cursor: pointer;
+            border: 1px solid transparent; /* Use border for consistent sizing */
+            transition: all 0.2s;
+            font-size: 0.9rem;
+        }
+        .btn-default {
+            background: white;
+            border-color: #cbd5e1;
+            color: #64748b;
+            margin-right: 10px;
+        }
+        .btn-default:hover {
+            background: #f1f5f9;
+            border-color: #94a3b8;
+        }
+        .btn-primary {
+            background: #3b82f6;
+            border-color: #3b82f6;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #2563eb;
+            border-color: #2563eb;
+        }
+         .btn-primary:disabled {
+            background: #a5b4fc;
+            border-color: #a5b4fc;
+            cursor: not-allowed;
+        }
+         .btn-danger {
+             background: var(--danger);
+             border-color: var(--danger);
+             color: white;
+         }
+         .btn-danger:hover {
+             background: #f87171;
+             border-color: #f87171;
+         }
+
+        /* Existing Derived Tickers List */
+         .derived-list h3 {
+             margin-bottom: 15px;
+             color: var(--dark);
+         }
+        .derived-item {
+            padding: 12px 15px;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: white;
+            font-size: 0.9rem;
+        }
+         .derived-item-info {
+             flex-grow: 1;
+             margin-right: 15px;
+         }
+         .derived-item-ticker {
+             font-weight: 600;
+             color: var(--dark);
+         }
+          .derived-item-formula {
+             font-family: monospace;
+             color: var(--secondary);
+             font-size: 0.85em;
+             margin-top: 4px;
+             word-break: break-all; /* Prevent long formulas from breaking layout */
+         }
+         .derived-item-actions button {
+            margin-left: 5px;
+            padding: 5px 10px; /* Smaller buttons */
+            font-size: 0.8rem;
+         }
+
+        /* Autocomplete for Ticker Search */
+        .autocomplete-suggestions {
+             position: absolute;
+             background-color: #fff;
+             border: 1px solid var(--border);
+             border-radius: 0.25rem;
+             max-height: 150px; /* Adjust height */
+             overflow-y: auto;
+             z-index: 1000;
+             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+             width: calc(100% - 2px); /* Match input width */
+             margin-top: 2px; /* Small gap */
+        }
+        .autocomplete-suggestion {
+             padding: 0.6rem 0.8rem;
+             cursor: pointer;
+             font-size: 0.875rem;
+        }
+        .autocomplete-suggestion:hover {
+             background-color: #eff6ff;
+        }
+        .suggestion-ticker { font-weight: 600; }
+        .suggestion-source { font-size: 0.8em; color: var(--secondary); margin-left: 5px; }
+        .suggestion-type { float: right; font-size: 0.8em; }
+
+        /* Notification */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #10b981;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 4px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: none;
+            z-index: 2000;
+            animation: fadeInOut 4s ease;
+        }
+        .notification.error {
+             background: var(--danger);
+        }
+        .notification.show {
+             display: block;
+        }
+
+        @keyframes fadeInOut {
+            0%, 100% { opacity: 0; transform: translateY(-10px); }
+            10%, 90% { opacity: 1; transform: translateY(0); }
+        }
+    </style>
 </head>
 <body>
-<div class="container">
-  <div class="header">
-    <h2 style="margin: 0; font-size: 18px; color: #334155;">Create New Derived Ticker</h2>
-    <div class="close-btn" onclick="window.location.href='/dashboard'">✕</div>
-  </div>
-  
-  <div class="body">
-    <div class="form-group">
-      <label class="form-label">Ticker Symbol</label>
-      <input type="text" class="form-control" placeholder="Enter a unique ticker symbol..." id="tickerSymbol">
-    </div>
-    
-    <div class="form-group">
-      <label class="form-label">Formula Builder</label>
-      <div class="formula-builder">
-        <div class="builder-section">
-          <div class="section-header">Available Tickers</div>
-          <div class="section-content" id="availableTickerContainer">
-            <div class="search-box">
-              <input type="text" placeholder="Search tickers..." id="tickerSearch">
+
+    <div class="container" id="manager-form">
+        <div class="header">
+            <h2 id="form-title">Create New Derived Ticker</h2>
             </div>
-            <div id="tickerList">
-              <!-- Ticker items loaded dynamically from /api/tickers -->
+        <div class="body">
+            <input type="hidden" id="edit-ticker-original-name" value=""> <div class="form-group">
+                <label for="ticker-symbol" class="form-label">Ticker Symbol</label>
+                <input type="text" id="ticker-symbol" class="form-control" placeholder="e.g., GOLD_OIL_RATIO">
+                 <div class="input-hint">Unique identifier (A-Z, 0-9, ., _, -)</div>
             </div>
-          </div>
+
+            <div class="form-group">
+                <label class="form-label">Formula Builder</label>
+                <div class="formula-builder">
+                    <div class="builder-section">
+                        <div class="section-header">Available Tickers</div>
+                        <div class="search-box">
+                            <input type="text" id="tickerSearch" placeholder="Search tickers...">
+                             <div id="tickerSuggestions" class="autocomplete-suggestions" style="display: none; max-height: 150px;"></div>
+                        </div>
+                        <div class="section-content" id="tickerList">
+                            <p style="text-align: center; color: var(--secondary); font-size: 0.8rem;">Search to add tickers</p>
+                        </div>
+                    </div>
+                    <div class="builder-section">
+                        <div class="section-header">Operators</div>
+                        <div class="section-content operators-grid">
+                            <div class="operator-item" data-value="+">+</div>
+                            <div class="operator-item" data-value="-">-</div>
+                            <div class="operator-item" data-value="*">×</div>
+                            <div class="operator-item" data-value="/">/</div>
+                            <div class="operator-item" data-value="(">(</div>
+                            <div class="operator-item" data-value=")">)</div>
+                        </div>
+                    </div>
+                    <div class="builder-section">
+                        <div class="section-header">Constants</div>
+                        <div class="section-content constants-list">
+                            <div class="constant-item" data-value="1">1</div>
+                            <div class="constant-item" data-value="2">2</div>
+                            <div class="constant-item" data-value="0.5">0.5</div>
+                            <div class="constant-item" data-value="100">100</div>
+                            <div class="constant-item" data-value="1000">1000</div>
+                             <div class="add-constant-input">
+                                 <input type="number" id="customConstantValue" placeholder="Custom #" step="any">
+                                 <button id="addCustomConstantBtn" class="btn btn-default" style="padding: 4px 8px; font-size: 11px;">Add</button>
+                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <label class="form-label" style="margin-top: 15px;">Formula Preview</label>
+                <div class="formula-preview" id="formulaPreview">
+                    <span class="formula-placeholder">Build your formula above...</span>
+                    <button class="clear-all" id="clearFormulaBtn" title="Clear Formula">Clear</button>
+                </div>
+                <div class="formula-validation" id="formulaValidation">
+                    </div>
+            </div>
+
+            <div class="preview-result">
+                <span class="result-label">Current Result Preview:</span>
+                <span class="result-value loading" id="previewResultValue">Enter a valid formula to preview</span>
+            </div>
         </div>
-        
-        <div class="builder-section">
-          <div class="section-header">Operators</div>
-          <div class="section-content">
-            <div class="operator-item" data-value="+">+</div>
-            <div class="operator-item" data-value="-">-</div>
-            <div class="operator-item" data-value="*">×</div>
-            <div class="operator-item" data-value="/">/</div>
-            <div class="operator-item" style="width: 100%;" data-value="(">(</div>
-            <div class="operator-item" style="width: 100%;" data-value=")">)</div>
-          </div>
+        <div class="footer">
+            <button class="btn btn-default" id="cancelEditBtn" style="display: none;">Cancel Edit</button>
+            <button class="btn btn-primary" id="saveTickerBtn">Create Ticker</button>
         </div>
-        
-        <div class="builder-section">
-          <div class="section-header">Constants</div>
-          <div class="section-content">
-            <div class="constant-item" data-value="2">2</div>
-            <div class="constant-item" data-value="0.5">0.5</div>
-            <div class="constant-item" data-value="100">100</div>
-            <div class="constant-item" data-value="1000">1000</div>
-            <div class="ticker-item" style="background: #dbeafe; color: #3b82f6;" id="customValueBtn">Add Custom Value</div>
-          </div>
-        </div>
-      </div>
-      
-      <label class="form-label" style="margin-top: 15px;">Formula Preview</label>
-      <div class="formula-preview">
-        <div class="formula-tokens" id="formulaTokens">
-          <!-- Tokens will be added here -->
-        </div>
-        <div class="clear-all" id="clearAll">Clear All</div>
-      </div>
-      
-      <div class="formula-validation" id="validation">
-        <!-- Validation message will appear here -->
-      </div>
     </div>
-    
-    <div class="preview-result">
-      <span class="result-label">Current Result:</span>
-      <span class="result-value" id="resultValue">–</span>
+
+    <div class="container-list">
+         <h3>Existing Derived Tickers</h3>
+         <div id="derived-list-content">
+             <p>Loading existing tickers...</p>
+         </div>
     </div>
-    
-    <div style="margin-top: 20px;">
-      <button class="btn btn-primary" id="createBtn">Create Derived Ticker</button>
-    </div>
-    
-    <div class="derived-list" id="derivedTickerList">
-      <!-- List of existing derived tickers will be displayed here -->
-    </div>
-  </div>
-  
-  <div class="footer">
-    <button class="btn btn-default" onclick="window.location.href='/dashboard'">Cancel</button>
-  </div>
-</div>
 
-<div class="notification" id="notification">
-  Ticker created successfully!
-</div>
+    <div id="notification" class="notification">Message goes here</div>
 
-<script>
-  // Global variable to store available tickers loaded from the tickers endpoint
-  let availableTickers = [];
-  // Array to store the current formula parts
-  let formula = [];
+    <script>
+        const tickerSymbolInput = document.getElementById('ticker-symbol');
+        const tickerSearchInput = document.getElementById('tickerSearch');
+        const tickerSuggestions = document.getElementById('tickerSuggestions');
+        const tickerListDiv = document.getElementById('tickerList');
+        const operatorItems = document.querySelectorAll('.operator-item');
+        const constantItems = document.querySelectorAll('.constant-item');
+        const formulaPreviewDiv = document.getElementById('formulaPreview');
+        const formulaValidationDiv = document.getElementById('formulaValidation');
+        const previewResultValueSpan = document.getElementById('previewResultValue');
+        const saveTickerBtn = document.getElementById('saveTickerBtn');
+        const cancelEditBtn = document.getElementById('cancelEditBtn');
+        const formTitle = document.getElementById('form-title');
+        const originalNameInput = document.getElementById('edit-ticker-original-name');
+        const derivedListContent = document.getElementById('derived-list-content');
+        const notificationDiv = document.getElementById('notification');
+        const clearFormulaBtn = document.getElementById('clearFormulaBtn');
+        const addCustomConstantBtn = document.getElementById('addCustomConstantBtn');
+        const customConstantValueInput = document.getElementById('customConstantValue');
 
-  // Load available tickers from the /api/tickers endpoint with a wildcard query ("%25")
-  function loadAvailableTickers() {
-    fetch('/api/tickers?query=%25&limit=100000')
-      .then(response => response.json())
-      .then(data => {
-        availableTickers = data.map(item => item.ticker);
-        renderTickerList();
-      })
-      .catch(err => {
-        console.error("Error loading available tickers:", err);
-      });
-  }
 
-  // Render the ticker list inside the tickerList div
-  function renderTickerList() {
-    const tickerListDiv = document.getElementById('tickerList');
-    tickerListDiv.innerHTML = '';
-    availableTickers.forEach(ticker => {
-      const div = document.createElement('div');
-      div.className = 'ticker-item';
-      div.setAttribute('data-value', ticker);
-      div.textContent = ticker;
-      div.addEventListener('click', () => {
-        addItemToFormula(ticker, 'ticker');
-        div.classList.add('selected');
-        setTimeout(() => div.classList.remove('selected'), 200);
-      });
-      tickerListDiv.appendChild(div);
-    });
-  }
+        let formula = []; // Array to hold formula tokens {type: 'ticker'/'operator'/'constant'/'paren', value: 'AAPL'/'+'/100/'('}
+        let isEditing = false;
 
-  // Filter ticker list based on search input
-  document.getElementById('tickerSearch').addEventListener('input', function() {
-    const query = this.value.toLowerCase();
-    const items = document.querySelectorAll('#tickerList .ticker-item');
-    items.forEach(item => {
-      if (item.textContent.toLowerCase().includes(query)) {
-        item.style.display = 'block';
-      } else {
-        item.style.display = 'none';
-      }
-    });
-  });
+         // --- Debounce Function ---
+         function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+         }
 
-  // Add an item to the formula
-  function addItemToFormula(value, type) {
-    formula.push(value);
-    updateFormulaPreview();
-    validateFormula();
-    calculateResult();
-  }
-  
-  // Update the formula preview by rendering tokens
-  function updateFormulaPreview() {
-    const formulaTokens = document.getElementById('formulaTokens');
-    formulaTokens.innerHTML = '';
-    formula.forEach((item, index) => {
-      const token = document.createElement('div');
-      let tokenType = '';
-      if (['+', '-', '*', '/', '(', ')'].includes(item)) {
-        tokenType = 'token-operator';
-      } else if (!isNaN(parseFloat(item))) {
-        tokenType = 'token-constant';
-      } else {
-        tokenType = 'token-ticker';
-      }
-      token.className = `formula-token ${tokenType}`;
-      token.innerHTML = `${item} <div class="token-close" data-index="${index}">×</div>`;
-      formulaTokens.appendChild(token);
-    });
-    document.querySelectorAll('.token-close').forEach(btn => {
-      btn.addEventListener('click', function() {
-        const idx = parseInt(this.getAttribute('data-index'));
-        removeFormulaItem(idx);
-      });
-    });
-  }
-  
-  // Remove an item from the formula
-  function removeFormulaItem(index) {
-    formula.splice(index, 1);
-    updateFormulaPreview();
-    validateFormula();
-    calculateResult();
-  }
-  
-  // Clear the entire formula
-  function clearFormula() {
-    formula = [];
-    updateFormulaPreview();
-    validateFormula();
-    calculateResult();
-  }
-  
-  document.getElementById('clearAll').addEventListener('click', clearFormula);
-  
-  // Simple validation check for the formula
-  function validateFormula() {
-    const validation = document.getElementById('validation');
-    if (formula.length === 0) {
-      validation.innerHTML = '';
-      return;
-    }
-    const hasOperator = formula.some(item => ['+', '-', '*', '/'].includes(item));
-    const hasTickers = formula.some(item => availableTickers.includes(item));
-    if (hasOperator && hasTickers) {
-      validation.innerHTML = '<span class="validation-icon">✓</span> Formula is valid';
-      validation.classList.remove('error');
-    } else {
-      validation.innerHTML = '<span class="validation-icon">⚠</span> Formula needs more components';
-      validation.classList.add('error');
-    }
-  }
-  
-  // Calculate a preview result (placeholder text)
-  function calculateResult() {
-    const resultValue = document.getElementById('resultValue');
-    if (formula.length < 3 || document.getElementById('validation').classList.contains('error')) {
-      resultValue.textContent = '–';
-      return;
-    }
-    resultValue.textContent = 'Calculated Preview';
-  }
-  
-  // Attach event listener for custom value button
-  document.getElementById('customValueBtn').addEventListener('click', () => {
-    const value = prompt("Enter a numerical value:");
-    if (value && !isNaN(parseFloat(value))) {
-      addItemToFormula(value, 'constant');
-    }
-  });
-  
-  // Attach event listeners for operator items
-  function attachOperatorListeners() {
-    document.querySelectorAll('.operator-item').forEach(item => {
-      item.addEventListener('click', () => {
-        const value = item.getAttribute('data-value');
-        addItemToFormula(value, 'operator');
-        item.classList.add('selected');
-        setTimeout(() => item.classList.remove('selected'), 200);
-      });
-    });
-  }
-  
-  // Attach event listeners for constant items
-  function attachConstantListeners() {
-    document.querySelectorAll('.constant-item').forEach(item => {
-      item.addEventListener('click', () => {
-        const value = item.getAttribute('data-value');
-        addItemToFormula(value, 'constant');
-        item.classList.add('selected');
-        setTimeout(() => item.classList.remove('selected'), 200);
-      });
-    });
-  }
-  
-  // Create Derived Ticker via API
-  document.getElementById('createBtn').addEventListener('click', () => {
-    const tickerSymbol = document.getElementById('tickerSymbol').value.trim();
-    if (tickerSymbol === '') {
-      alert('Please enter a ticker symbol');
-      return;
-    }
-    if (formula.length < 3 || document.getElementById('validation').classList.contains('error')) {
-      alert('Please create a valid formula');
-      return;
-    }
-    const data = {
-      ticker: tickerSymbol,
-      formula: formula.join(' ')
-    };
-    fetch('/api/derived', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(data)
-    })
-    .then(response => response.json())
-    .then(result => {
-      showNotification(result.message || result.error);
-      loadDerivedTickers();
-    })
-    .catch(err => {
-      alert('Error: ' + err);
-    });
-  });
-  
-  // Load existing derived tickers from API
-  function loadDerivedTickers() {
-    fetch('/api/derived')
-      .then(response => response.json())
-      .then(data => {
-        const list = document.getElementById('derivedTickerList');
-        list.innerHTML = '<h3>Existing Derived Tickers</h3>';
-        data.forEach(item => {
-          const div = document.createElement('div');
-          div.className = 'derived-item';
-          div.innerHTML = `<span>${item.ticker}: ${item.formula}</span>
-            <button onclick="deleteTicker('${item.ticker}')">Delete</button>`;
-          list.appendChild(div);
+         // --- Ticker Search and Suggestions ---
+         function renderTickerSuggestions(data) {
+             tickerSuggestions.innerHTML = '';
+             if (data && data.length > 0) {
+                 data.forEach(item => {
+                     const div = document.createElement('div');
+                     div.className = 'autocomplete-suggestion';
+                     let sourceDisplay = item.source_ticker && item.source_ticker !== item.ticker
+                                          ? `<span class="suggestion-source">(${item.source_ticker})</span>` : '';
+                     let typeBadgeClass = `type-${(item.asset_type || 'unknown').toLowerCase()}`;
+                     div.innerHTML = `
+                       <span class="suggestion-ticker">${item.ticker}</span>
+                       ${sourceDisplay}
+                       <span class="type ${typeBadgeClass} suggestion-type">${item.asset_type || 'N/A'}</span>`;
+                     div.onclick = () => {
+                         addToken({ type: 'ticker', value: item.ticker });
+                         tickerSearchInput.value = '';
+                         tickerSuggestions.style.display = 'none';
+                         tickerSearchInput.focus(); // Keep focus for next search
+                     };
+                     tickerSuggestions.appendChild(div);
+                 });
+                 tickerSuggestions.style.display = 'block';
+             } else {
+                 tickerSuggestions.style.display = 'none';
+             }
+         }
+
+         tickerSearchInput.addEventListener('input', debounce(() => {
+             const query = tickerSearchInput.value.trim();
+             if (query.length < 1) {
+                 tickerSuggestions.style.display = 'none';
+                 return;
+             }
+             // Fetch from /api/tickers (including derived)
+             fetch(`/api/tickers?query=${encodeURIComponent(query)}&limit=7&fuzzy=true`) // Limit suggestions
+                 .then(response => response.json())
+                 .then(data => renderTickerSuggestions(data))
+                 .catch(err => {
+                     console.error("Ticker search error:", err);
+                     tickerSuggestions.style.display = 'none';
+                 });
+         }, 300));
+
+         // Hide suggestions when clicking outside search box
+         document.addEventListener('click', (e) => {
+             if (!tickerSearchInput.contains(e.target) && !tickerSuggestions.contains(e.target)) {
+                 tickerSuggestions.style.display = 'none';
+             }
+         });
+
+
+        // --- Formula Building ---
+        function addToken(token) {
+            // Basic validation: Prevent double operators (except unary minus potentially), invalid sequences
+             const lastToken = formula.length > 0 ? formula[formula.length - 1] : null;
+
+             // Prevent operator directly after another operator (simple check)
+             if (token.type === 'operator' && lastToken && lastToken.type === 'operator') {
+                 // Allow '-' if previous was '(', '*', '/', '+'
+                 if (token.value === '-' && ['(','*','/','+'].includes(lastToken.value)) {
+                      // Allow unary minus
+                 } else {
+                     showValidationMessage('Cannot place operator directly after another operator.', 'error');
+                     return;
+                 }
+             }
+             // Prevent ticker/constant directly after ticker/constant
+            if ((token.type === 'ticker' || token.type === 'constant') && lastToken && (lastToken.type === 'ticker' || lastToken.type === 'constant')) {
+                 showValidationMessage('Operator expected after ticker or constant.', 'error');
+                 return;
+            }
+            // Prevent operator after '(' unless it's unary '-'
+             if (lastToken && lastToken.value === '(' && token.type === 'operator' && token.value !== '-') {
+                 showValidationMessage('Ticker, constant, or unary minus expected after (.', 'error');
+                 return;
+             }
+             // Prevent ')' after operator
+             if (token.value === ')' && lastToken && lastToken.type === 'operator') {
+                 showValidationMessage('Ticker or constant expected before ).', 'error');
+                 return;
+             }
+
+
+            formula.push(token);
+            renderFormula();
+            validateAndPreview();
+        }
+
+        function removeToken(index) {
+            formula.splice(index, 1);
+            renderFormula();
+            validateAndPreview();
+        }
+
+        function renderFormula() {
+            formulaPreviewDiv.innerHTML = ''; // Clear
+             const placeholder = document.createElement('span');
+             placeholder.className = 'formula-placeholder';
+             placeholder.textContent = 'Build your formula above...';
+
+
+            if (formula.length === 0) {
+                formulaPreviewDiv.appendChild(placeholder);
+            } else {
+                 formula.forEach((token, index) => {
+                    const tokenSpan = document.createElement('span');
+                    tokenSpan.classList.add('formula-token');
+                    tokenSpan.classList.add(`token-${token.type}`);
+                    tokenSpan.textContent = token.value;
+
+                    const closeSpan = document.createElement('span');
+                    closeSpan.className = 'token-close';
+                    closeSpan.innerHTML = '&times;'; // Use × symbol
+                    closeSpan.title = 'Remove token';
+                    closeSpan.onclick = () => removeToken(index);
+
+                    tokenSpan.appendChild(closeSpan);
+                    formulaPreviewDiv.appendChild(tokenSpan);
+                 });
+            }
+             // Re-append clear button
+             formulaPreviewDiv.appendChild(clearFormulaBtn);
+        }
+
+        clearFormulaBtn.addEventListener('click', () => {
+             formula = [];
+             renderFormula();
+             validateAndPreview();
         });
-      });
-  }
-  
-  // Delete derived ticker via API
-  function deleteTicker(ticker) {
-    if (!confirm(`Delete derived ticker ${ticker}?`)) return;
-    fetch('/api/derived/' + ticker, { method: 'DELETE' })
-      .then(response => response.json())
-      .then(result => {
-        showNotification(result.message || result.error);
-        loadDerivedTickers();
-      });
-  }
-  
-  // Show notification message
-  function showNotification(msg) {
-    const notification = document.getElementById('notification');
-    notification.textContent = msg;
-    notification.style.display = 'block';
-    setTimeout(() => {
-      notification.style.display = 'none';
-    }, 3000);
-  }
-  
-  // Initialize after DOM content is loaded
-  window.addEventListener('DOMContentLoaded', () => {
-    loadAvailableTickers();
-    loadDerivedTickers();
-    attachOperatorListeners();
-    attachConstantListeners();
-  });
-</script>
+
+        operatorItems.forEach(item => {
+             const value = item.dataset.value;
+             const type = (value === '(' || value === ')') ? 'paren' : 'operator';
+            item.addEventListener('click', () => addToken({ type: type, value: value }));
+        });
+
+         function addConstantItem(value) {
+             const constantsList = document.querySelector('.constants-list');
+             // Check if custom value section exists
+             let customSection = constantsList.querySelector('.custom-constants');
+             if (!customSection) {
+                 customSection = document.createElement('div');
+                 customSection.className = 'custom-constants';
+                 // Find the add input and insert before it
+                 const addInputDiv = constantsList.querySelector('.add-constant-input');
+                 if (addInputDiv) {
+                    constantsList.insertBefore(customSection, addInputDiv);
+                 } else {
+                    constantsList.appendChild(customSection); // Fallback
+                 }
+             }
+
+             // Avoid adding duplicates visually
+             const existing = customSection.querySelector(`[data-value="${value}"]`);
+             if (existing) return;
+
+
+             const div = document.createElement('div');
+             div.className = 'constant-item';
+             div.dataset.value = value;
+             div.textContent = value;
+             div.addEventListener('click', () => addToken({ type: 'constant', value: value }));
+             customSection.appendChild(div);
+         }
+
+
+         constantItems.forEach(item => {
+            item.addEventListener('click', () => addToken({ type: 'constant', value: item.dataset.value }));
+         });
+
+         addCustomConstantBtn.addEventListener('click', () => {
+              const valueStr = customConstantValueInput.value.trim();
+              if (valueStr && !isNaN(valueStr)) {
+                   const value = Number(valueStr); // Convert to number
+                   addConstantItem(value); // Add visually to the list
+                   addToken({ type: 'constant', value: value }); // Add to formula
+                   customConstantValueInput.value = ''; // Clear input
+              } else {
+                   showValidationMessage('Please enter a valid number.', 'error');
+              }
+         });
+
+
+        // --- Formula Validation and Preview ---
+        function showValidationMessage(message, type = 'info') {
+            formulaValidationDiv.textContent = message;
+            formulaValidationDiv.className = `formula-validation ${type}`;
+             // Add icons later if desired
+        }
+
+        const validateAndPreview = debounce(() => {
+            const formulaString = formula.map(t => t.value).join(' '); // Simple space join
+            previewResultValueSpan.textContent = 'Validating...';
+            previewResultValueSpan.className = 'result-value loading';
+            formulaValidationDiv.textContent = ''; // Clear previous validation
+
+            if (formula.length === 0) {
+                 showValidationMessage('Formula is empty.', 'info');
+                 previewResultValueSpan.textContent = '–';
+                 previewResultValueSpan.className = 'result-value';
+                 return;
+            }
+
+             // Basic Parentheses Check
+             let parenBalance = 0;
+             for (const token of formula) {
+                 if (token.value === '(') parenBalance++;
+                 else if (token.value === ')') parenBalance--;
+                 if (parenBalance < 0) {
+                     showValidationMessage('Unmatched closing parenthesis ")".', 'error');
+                     previewResultValueSpan.textContent = 'Invalid';
+                     previewResultValueSpan.className = 'result-value error';
+                     return;
+                 }
+             }
+             if (parenBalance > 0) {
+                 showValidationMessage('Unmatched opening parenthesis "(".', 'error');
+                 previewResultValueSpan.textContent = 'Invalid';
+                 previewResultValueSpan.className = 'result-value error';
+                 return;
+             }
+
+            // Basic Operator Placement Check (already partially done in addToken)
+            // Check start/end tokens
+             const firstToken = formula[0];
+             const lastToken = formula[formula.length - 1];
+             if (['+', '*', '/'].includes(firstToken.value) || ['+', '-', '*', '/'].includes(lastToken.value)) {
+                   showValidationMessage('Formula cannot start or end with most operators.', 'error');
+                   previewResultValueSpan.textContent = 'Invalid';
+                   previewResultValueSpan.className = 'result-value error';
+                   return;
+             }
+
+
+            // Call backend for preview and definitive validation
+            previewResultValueSpan.textContent = 'Calculating...';
+            previewResultValueSpan.className = 'result-value loading';
+
+            fetch('/api/derived/preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ formula: formulaString })
+            })
+            .then(response => response.json().then(data => ({ status: response.status, body: data })))
+            .then(({ status, body }) => {
+                if (status >= 200 && status < 300 && body.result !== undefined) {
+                    showValidationMessage('Formula looks valid. Preview calculated.', 'success');
+                    previewResultValueSpan.textContent = formatPreviewValue(body.result);
+                    previewResultValueSpan.className = 'result-value';
+                     // Optionally display context: console.log("Preview Context:", body.context);
+                } else {
+                    // Handle validation errors from backend or other issues
+                    const errorMsg = body.error || 'Preview failed.';
+                    showValidationMessage(errorMsg, 'error');
+                    previewResultValueSpan.textContent = 'Error';
+                    previewResultValueSpan.className = 'result-value error';
+                     console.error("Preview Error:", body);
+                }
+            })
+            .catch(err => {
+                console.error("Preview Fetch Error:", err);
+                showValidationMessage('Network error during preview.', 'error');
+                previewResultValueSpan.textContent = 'Error';
+                previewResultValueSpan.className = 'result-value error';
+            });
+
+        }, 500); // Debounce preview calculation
+
+         function formatPreviewValue(value) {
+             if (value === null || value === undefined) return 'N/A';
+             if (typeof value === 'number') {
+                 if (Math.abs(value) >= 1) return value.toFixed(2);
+                 if (Math.abs(value) >= 0.01) return value.toFixed(4);
+                 return value.toPrecision(4);
+             }
+             return String(value); // Fallback
+         }
+
+
+        // --- Save/Update Ticker ---
+        saveTickerBtn.addEventListener('click', () => {
+            const ticker = tickerSymbolInput.value.trim();
+            const formulaString = formula.map(t => t.value).join(' ');
+             const originalTicker = originalNameInput.value; // Get original name for editing
+
+
+            if (!ticker) {
+                showNotification('Ticker symbol is required.', 'error');
+                return;
+            }
+            if (formula.length === 0) {
+                showNotification('Formula cannot be empty.', 'error');
+                return;
+            }
+             // Use backend validation before saving
+              // Call backend for preview and definitive validation
+            fetch('/api/derived/preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ formula: formulaString })
+            })
+            .then(response => response.json().then(data => ({ status: response.status, body: data })))
+            .then(({ status, body }) => {
+                if (status >= 200 && status < 300 && body.result !== undefined) {
+                     // Formula is likely valid, proceed with save/update
+                     const url = isEditing ? `/api/derived/${encodeURIComponent(originalTicker)}` : '/api/derived';
+                     const method = isEditing ? 'PUT' : 'POST';
+                     const payload = { ticker: ticker, formula: formulaString }; // Send new ticker name if editing
+
+                     // Disable button during save
+                     saveTickerBtn.disabled = true;
+                     saveTickerBtn.textContent = isEditing ? 'Updating...' : 'Creating...';
+
+
+                    fetch(url, {
+                        method: method,
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    })
+                    .then(resp => resp.json().then(data => ({ status: resp.status, body: data })))
+                    .then(({ status, body }) => {
+                         if (status >= 200 && status < 300) {
+                             showNotification(body.message || 'Operation successful!', 'success');
+                             resetForm();
+                             loadDerivedTickers(); // Refresh list
+                         } else {
+                            showNotification(`Error: ${body.error || 'Failed to save ticker.'}`, 'error');
+                             console.error("Save/Update Error:", body);
+                         }
+                     })
+                     .catch(err => {
+                         showNotification('Network error saving ticker.', 'error');
+                         console.error("Save/Update Fetch Error:", err);
+                     })
+                     .finally(() => {
+                         saveTickerBtn.disabled = false; // Re-enable button
+                         saveTickerBtn.textContent = isEditing ? 'Update Ticker' : 'Create Ticker';
+                     });
+
+                 } else {
+                     // Handle validation errors from backend
+                     const errorMsg = body.error || 'Formula validation failed.';
+                     showNotification(`Cannot save: ${errorMsg}`, 'error');
+                 }
+            })
+            .catch(err => {
+                 console.error("Save Validation Fetch Error:", err);
+                 showNotification('Network error during validation before save.', 'error');
+            });
+        });
+
+        // --- Edit/Delete/Cancel Logic ---
+         function editTicker(tickerData) {
+             isEditing = true;
+             originalNameInput.value = tickerData.ticker; // Store original name for PUT request URL
+             tickerSymbolInput.value = tickerData.ticker;
+             // Simple space splitting - might fail for complex formulas not built with UI
+             // A more robust parser would be needed for arbitrary formulas. Assuming UI built formulas.
+             formula = tickerData.formula.split(' ').map(part => {
+                 if (!isNaN(part)) return { type: 'constant', value: Number(part) };
+                 if (['+', '-', '*', '/', '(', ')'].includes(part)) return { type: (part === '(' || part === ')') ? 'paren' : 'operator', value: part };
+                 // Assume anything else is a ticker - this is a simplification
+                 if (/^[A-Z0-9._-]+$/i.test(part)) return { type: 'ticker', value: part };
+                 return { type: 'unknown', value: part }; // Mark unknown parts
+             }).filter(t => t.type !== 'unknown'); // Filter out unknowns for now
+
+             renderFormula();
+             validateAndPreview();
+             formTitle.textContent = 'Edit Derived Ticker';
+             saveTickerBtn.textContent = 'Update Ticker';
+             cancelEditBtn.style.display = 'inline-block';
+             tickerSymbolInput.focus();
+             // Scroll to the form
+             document.getElementById('manager-form').scrollIntoView({ behavior: 'smooth' });
+         }
+
+         function deleteTicker(ticker) {
+              if (!confirm(`Are you sure you want to delete the derived ticker "${ticker}"?`)) {
+                 return;
+              }
+
+             fetch(`/api/derived/${encodeURIComponent(ticker)}`, { method: 'DELETE' })
+             .then(response => response.json().then(data => ({ status: response.status, body: data })))
+             .then(({ status, body }) => {
+                 if (status >= 200 && status < 300) {
+                     showNotification(body.message || 'Ticker deleted successfully.', 'success');
+                     loadDerivedTickers(); // Refresh list
+                 } else {
+                     showNotification(`Error: ${body.error || 'Failed to delete ticker.'}`, 'error');
+                      console.error("Delete Error:", body);
+                 }
+             })
+             .catch(err => {
+                 showNotification('Network error deleting ticker.', 'error');
+                 console.error("Delete Fetch Error:", err);
+             });
+         }
+
+        function resetForm() {
+            isEditing = false;
+            originalNameInput.value = '';
+            tickerSymbolInput.value = '';
+            formula = [];
+            renderFormula();
+            formulaValidationDiv.textContent = '';
+            previewResultValueSpan.textContent = '–';
+            previewResultValueSpan.className = 'result-value';
+            formTitle.textContent = 'Create New Derived Ticker';
+            saveTickerBtn.textContent = 'Create Ticker';
+            cancelEditBtn.style.display = 'none';
+            tickerSymbolInput.disabled = false; // Ensure ticker symbol is enabled for creation
+        }
+
+        cancelEditBtn.addEventListener('click', resetForm);
+
+        // --- Load Existing Tickers ---
+        function loadDerivedTickers() {
+            derivedListContent.innerHTML = '<p>Loading existing tickers...</p>';
+            fetch('/api/derived')
+                .then(response => response.json())
+                .then(data => {
+                    derivedListContent.innerHTML = ''; // Clear loading
+                    if (data && data.length > 0) {
+                         data.forEach(item => {
+                            const div = document.createElement('div');
+                            div.className = 'derived-item';
+                            div.innerHTML = `
+                                <div class="derived-item-info">
+                                    <div class="derived-item-ticker">${item.ticker}</div>
+                                    <div class="derived-item-formula">${item.formula}</div>
+                                </div>
+                                <div class="derived-item-actions">
+                                    <button class="btn btn-default btn-sm edit-btn">Edit</button>
+                                    <button class="btn btn-danger btn-sm delete-btn">Delete</button>
+                                </div>
+                            `;
+                             div.querySelector('.edit-btn').addEventListener('click', () => editTicker(item));
+                             div.querySelector('.delete-btn').addEventListener('click', () => deleteTicker(item.ticker));
+                            derivedListContent.appendChild(div);
+                         });
+                    } else {
+                        derivedListContent.innerHTML = '<p>No derived tickers created yet.</p>';
+                    }
+                })
+                .catch(err => {
+                    derivedListContent.innerHTML = '<p class="error">Error loading derived tickers.</p>';
+                    console.error("Load Derived Error:", err);
+                });
+        }
+
+        // --- Notification ---
+        function showNotification(message, type = 'success') {
+            notificationDiv.textContent = message;
+            notificationDiv.className = `notification ${type}`; // 'success' or 'error'
+            notificationDiv.classList.add('show');
+
+            // Auto-hide after 4 seconds (matches animation duration)
+            setTimeout(() => {
+                notificationDiv.classList.remove('show');
+            }, 3900);
+        }
+
+
+        // --- Initial Load ---
+        document.addEventListener('DOMContentLoaded', () => {
+            renderFormula(); // Render empty formula initially
+            loadDerivedTickers();
+        });
+
+    </script>
 </body>
 </html>
