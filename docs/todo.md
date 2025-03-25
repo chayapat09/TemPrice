@@ -308,7 +308,7 @@ Also beware that quote_currency should be mapping to Asset (currency)
 from model change above please apply to below code
 --- Start of app.py --- import datetime import time import logging import os import io import pandas as pd import requests from collections import Counter from decimal import Decimal from flask import Flask, jsonify, request, render_template, current_app from sqlalchemy import BigInteger, Column, Date, DateTime, DECIMAL, Integer, String, create_engine, func, text, case from sqlalchemy.ext.declarative import declarative_base from sqlalchemy.orm import sessionmaker from apscheduler.schedulers.background import BackgroundScheduler from rapidfuzz import fuzz # for fuzzy matching from sqlalchemy.exc import SQLAlchemyError
 Configurable Parameters
-MAX_TICKERS_PER_REQUEST = 50 REQUEST_DELAY_SECONDS = 5 HISTORICAL_START_DATE = "2020-01-01" DATABASE_URL = "sqlite:///instance/stock_data.db" FLASK_HOST = "0.0.0.0" FLASK_PORT = 8082 TOP_N_TICKERS = 100 LATEST_CACHE_REFRESH_INTERVAL_MINUTES = 1 REGULAR_TTL = 15 NOT_FOUND_TTL = 1440 QUERY_COUNTER_SAVE_INTERVAL_MINUTES = 5 DELTA_SYNC_INTERVAL_DAYS = 1
+MAX_TICKERS_PER_REQUEST = 50 REQUEST_DELAY_SECONDS = 5 HISTORICAL_START_DATE = "2013-01-01" DATABASE_URL = "sqlite:///instance/stock_data.db" FLASK_HOST = "0.0.0.0" FLASK_PORT = 8082 TOP_N_TICKERS = 100 LATEST_CACHE_REFRESH_INTERVAL_MINUTES = 1 REGULAR_TTL = 15 NOT_FOUND_TTL = 1440 QUERY_COUNTER_SAVE_INTERVAL_MINUTES = 5 DELTA_SYNC_INTERVAL_DAYS = 1
 New configuration for currency data (AlphaVantage)
 ALPHAVANTAGE_API_KEY = "demo" # Replace with your own API key CURRENCY_LIST_URL = "https://www.alphavantage.co/physical_currency_list/"
 Ensure the 'instance' directory exists

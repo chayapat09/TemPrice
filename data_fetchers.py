@@ -6,12 +6,12 @@ import yfinance as yf
 from decimal import Decimal
 from utils import safe_convert, chunk_list
 import logging
-from config import REGULAR_TTL, NOT_FOUND_TTL
+from config import HISTORICAL_START_DATE, REGULAR_TTL, NOT_FOUND_TTL
 from cache_storage import latest_cache
 
 logger = logging.getLogger(__name__)
 
-def fetch_yf_data_for_ticker(ticker, start_date="2020-01-01", end_date=None):
+def fetch_yf_data_for_ticker(ticker, start_date=HISTORICAL_START_DATE, end_date=None):
     logger.info(f"Fetching data for stock ticker: {ticker}")
     try:
         data = yf.Ticker(ticker)
@@ -35,7 +35,7 @@ def fetch_yf_data_for_ticker(ticker, start_date="2020-01-01", end_date=None):
         logger.error(f"Error fetching data for {ticker}: {e}")
         return None, None
 
-def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date="2020-01-01", end_date=None, sample_size=None):
+def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL_START_DATE, end_date=None, sample_size=None):
     logger.info("Starting data fetch from yfinance for stocks...")
     all_quotes = []
     offset = 0

@@ -1,3 +1,4 @@
+from config import HISTORICAL_START_DATE
 from flask import Flask, jsonify, request, render_template
 import datetime
 import os
@@ -465,7 +466,7 @@ def sync_full():
                 coin_data = next((coin for coin in coins if coin.get("id", "").lower() == ticker.lower()), None)
                 if coin_data:
                     symbol = coin_data["symbol"].upper() + "USDT"
-                    historical_data = fetch_binance_crypto_data(symbol, "2020-01-01", None)
+                    historical_data = fetch_binance_crypto_data(symbol, HISTORICAL_START_DATE, None)
                     if historical_data is not None:
                         from sync import update_crypto_asset_and_quote
                         update_crypto_asset_and_quote([coin_data], {coin_data["id"]: historical_data}, upsert=True)
@@ -673,5 +674,5 @@ if __name__ == "__main__":
     scheduler.add_job(delta_sync_crypto, "interval", days=DELTA_SYNC_INTERVAL_DAYS, id="delta_sync_crypto")
     scheduler.add_job(save_query_counter, "interval", minutes=QUERY_COUNTER_SAVE_INTERVAL_MINUTES, id="save_query_counter")
     scheduler.add_job(refresh_currency_prices, "interval", minutes=CURRENCY_CACHE_REFRESH_INTERVAL_MINUTES, id="currency_cache_refresh")
-    scheduler.start()
+    # scheduler.start()
     app.run(host=FLASK_HOST, port=FLASK_PORT)

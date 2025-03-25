@@ -3,9 +3,9 @@ import datetime
 import logging
 
 # Configurable Parameters
-MAX_TICKERS_PER_REQUEST = 50
+MAX_TICKERS_PER_REQUEST = 15
 REQUEST_DELAY_SECONDS = 5
-HISTORICAL_START_DATE = "2020-01-01"
+HISTORICAL_START_DATE = "2013-01-01"
 DATABASE_URL = "sqlite:///instance/stock_data.db"
 FLASK_HOST = "0.0.0.0"
 FLASK_PORT = 8082
@@ -26,5 +26,5 @@ if not os.path.exists('instance'):
     os.makedirs('instance')
 
 # Logging Configuration
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
