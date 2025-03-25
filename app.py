@@ -122,7 +122,7 @@ def data_quality():
 
 @app.route("/api/ticker_traffic")
 def ticker_traffic():
-    data = [{"ticker": t[1], "asset_type": t[0], "count": count} for t, count in query_counter.most_common()]
+    data = [{"ticker": t[0], "asset_type": t[1], "count": count} for t, count in query_counter.most_common()]
     return jsonify(data)
 
 @app.route("/api/cache_info")
