@@ -628,6 +628,7 @@ def sync_full():
 
     try:
         if ticker: # Sync specific ticker
+            # ... existing code for specific ticker sync ...
             if asset_type == "STOCK":
                 if not data_source or data_source.upper() != "YFINANCE":
                     return jsonify({"error": "Invalid data source for STOCK. Supported: YFINANCE"}), 400
@@ -635,11 +636,17 @@ def sync_full():
                 from data_fetchers import fetch_yf_data_for_ticker
                 from sync import update_stock_asset_and_quote
                 quotes_df, historical_data = fetch_yf_data_for_ticker(ticker, start_date=HISTORICAL_START_DATE) # Use config start date
-                if historical_data: # Check if historical data was fetched
-                    update_stock_asset_and_quote(quotes_df, historical_data, upsert=False) # Full sync = no upsert? Let's allow upsert=True for simplicity. It overwrites.
-                    return jsonify({"message": f"Full sync initiated for stock ticker {ticker} using {data_source}."})
+                if historical_data is not None and not historical_data.empty: # Check if historical data was fetched and not empty
+                    # Allow upsert=True for simplicity. It overwrites existing data on full sync.
+                    update_stock_asset_and_quote(quotes_df, {ticker: historical_data}, upsert=True)
+                    return jsonify({"message": f"Full sync completed for stock ticker {ticker} using {data_source}."})
                 else:
-                    return jsonify({"error": f"Failed to fetch data for stock ticker {ticker} from {data_source}"}), 404
+                    # Check if quotes_df has info even if historical is empty
+                    if quotes_df is not None and not quotes_df.empty:
+                         update_stock_asset_and_quote(quotes_df, {}, upsert=True) # Save quote info
+                         return jsonify({"warning": f"Quote info synced for {ticker}, but no historical data found from {data_source} for the period."}), 200
+                    else:
+                         return jsonify({"error": f"Failed to fetch any data for stock ticker {ticker} from {data_source}"}), 404
 
             elif asset_type == "CRYPTO":
                  # NOTE: Syncing a single crypto requires fetching its metadata first (CoinGecko)
@@ -659,17 +666,24 @@ def sync_full():
                 if not coin_data:
                     return jsonify({"error": f"Metadata not found for crypto ID '{ticker}' on CoinGecko"}), 404
 
-                binance_symbol = coin_data.get("symbol", "").upper() + "USDT" # Assume USDT pair
+                # Find the most likely Binance symbol (e.g., BTCUSDT, ETHUSDT)
+                # This might need refinement if pairs other than USDT are needed.
+                binance_symbol = coin_data.get("symbol", "").upper() + "USDT"
+                # Optional: Add logic here to try BUSD or other pairs if USDT fails?
+
                 historical_df = fetch_binance_crypto_data(binance_symbol, HISTORICAL_START_DATE, None)
 
-                if historical_df is not None: # Can be empty DataFrame if no data, but not None on error
+                # historical_df can be an empty DataFrame if no data is found, which is not an error.
+                # None usually indicates a fetch error.
+                if historical_df is not None:
                     # Need to wrap single coin data correctly for the update function
                     update_crypto_asset_and_quote([coin_data], {ticker: historical_df}, upsert=True)
-                    return jsonify({"message": f"Full sync initiated for crypto ID {ticker} (Symbol: {binance_symbol}) using CoinGecko/Binance."})
+                    message = f"Full sync completed for crypto ID {ticker} (Symbol: {binance_symbol}) using CoinGecko/Binance."
+                    if historical_df.empty:
+                        message += " (No historical OHLCV data found on Binance for this period)."
+                    return jsonify({"message": message})
                 else:
-                    # fetch_binance_crypto_data might return None on error or empty DF
-                     # Check if it was an error or just no data
-                     # Let's assume failure means error for simplicity here
+                    # fetch_binance_crypto_data returning None implies an error during fetch
                     return jsonify({"error": f"Failed to fetch historical data for {binance_symbol} from Binance"}), 404
 
 
@@ -677,29 +691,75 @@ def sync_full():
                 if not data_source or data_source.upper() != "ALPHAVANTAGE":
                     return jsonify({"error": "Invalid data source for CURRENCY. Supported: AlphaVantage"}), 400
                 # Call the specific currency sync function from sync.py
-                full_sync_currency(ticker=ticker) # Pass the specific ticker
-                return jsonify({"message": f"Full sync initiated for currency ticker {ticker} using {data_source}."})
+                # Assuming full_sync_currency handles potential errors internally or raises them
+                result_message = full_sync_currency(ticker=ticker) # Pass the specific ticker, expect message back
+                if "error" in result_message.lower():
+                     return jsonify({"error": f"Failed during full sync for currency {ticker}: {result_message}"}), 500
+                elif "not found" in result_message.lower():
+                     return jsonify({"error": f"Currency ticker {ticker} not found or data unavailable: {result_message}"}), 404
+                else:
+                     return jsonify({"message": f"Full sync completed for currency ticker {ticker} using {data_source}. Details: {result_message}"})
 
             else:
                 return jsonify({"error": "Invalid asset_type for specific sync"}), 400
 
-        else: # Global sync for the specified asset type
-            if asset_type == "STOCK":
-                # Consider running this in background? For now, run synchronously.
-                full_sync_stocks()
-                return jsonify({"message": "Global full sync for stocks initiated."})
-            elif asset_type == "CRYPTO":
-                full_sync_crypto()
-                return jsonify({"message": "Global full sync for cryptocurrencies initiated."})
-            elif asset_type == "CURRENCY":
-                full_sync_currency()
-                return jsonify({"message": "Global full sync for currencies initiated."})
+        else: # Global sync for ALL applicable types
+            logger.info("Initiating global full sync for Stocks, Crypto, and Currencies.")
+            # Consider running these in background tasks or signaling workers if they take too long.
+            # For now, run synchronously and report completion/errors.
+            results = {}
+            errors = {}
+
+            try:
+                logger.info("Starting global stock full sync...")
+                full_sync_stocks() # Assumes this function logs its own progress/errors
+                results["stocks"] = "Completed"
+                logger.info("Global stock full sync finished.")
+            except Exception as e_stock:
+                logger.error(f"Error during global stock full sync: {e_stock}\n{traceback.format_exc()}")
+                errors["stocks"] = str(e_stock)
+
+            time.sleep(1) # Small delay between sync types
+
+            try:
+                logger.info("Starting global crypto full sync...")
+                full_sync_crypto() # Assumes this function logs its own progress/errors
+                results["crypto"] = "Completed"
+                logger.info("Global crypto full sync finished.")
+            except Exception as e_crypto:
+                logger.error(f"Error during global crypto full sync: {e_crypto}\n{traceback.format_exc()}")
+                errors["crypto"] = str(e_crypto)
+
+            time.sleep(1) # Small delay
+
+            try:
+                logger.info("Starting global currency full sync...")
+                # Assuming full_sync_currency() returns a summary message or raises errors
+                sync_msg = full_sync_currency()
+                results["currency"] = f"Completed ({sync_msg})"
+                logger.info(f"Global currency full sync finished: {sync_msg}")
+            except Exception as e_curr:
+                logger.error(f"Error during global currency full sync: {e_curr}\n{traceback.format_exc()}")
+                errors["currency"] = str(e_curr)
+
+            response_message = "Global full sync process finished."
+            status_code = 200
+            if errors:
+                response_message += " Errors occurred during sync."
+                # Potentially return a different status code if errors are critical? 500? 207 Multi-Status?
+                # Let's stick to 200 but provide details.
+                return jsonify({
+                    "message": response_message,
+                    "sync_results": results,
+                    "sync_errors": errors
+                }), status_code
             else:
-                # Default to stocks if asset_type is invalid/missing for global sync?
-                # Let's require a valid type or default to STOCK.
-                 logger.warning(f"Invalid asset_type '{asset_type}' for global sync, defaulting to STOCK.")
-                 full_sync_stocks()
-                 return jsonify({"message": "Global full sync for stocks initiated (defaulted)."})
+                response_message += " All syncs completed successfully."
+                return jsonify({
+                    "message": response_message,
+                    "sync_results": results
+                }), status_code
+            # Removed the previous default-to-stock logic
 
     except ValueError as ve: # Catch specific errors like ticker not found in lists
         logger.warning(f"Value error during sync: {ve}")
@@ -707,7 +767,6 @@ def sync_full():
     except Exception as e:
         logger.error(f"Error in full sync endpoint: {e}\n{traceback.format_exc()}")
         return jsonify({"error": f"An unexpected error occurred during sync: {str(e)}"}), 500
-
 
 @app.route("/api/sync/delta", methods=["POST"])
 def sync_delta():
@@ -743,11 +802,20 @@ def sync_delta():
                 from sync import update_stock_asset_and_quote
                 # Fetch only recent data
                 quotes_df, historical_data = fetch_yf_data_for_ticker(ticker, start_date=start_date_str, end_date=end_date_str)
-                if historical_data:
-                    update_stock_asset_and_quote(quotes_df, historical_data, upsert=True) # Delta sync must upsert
-                    return jsonify({"message": f"Delta sync initiated for stock ticker {ticker} using {data_source}."})
+                # Check if any data was fetched (either quote or historical)
+                if (quotes_df is not None and not quotes_df.empty) or \
+                   (historical_data is not None and not historical_data.empty):
+                    # Pass empty dict/df if None was returned
+                    quotes_to_pass = quotes_df if quotes_df is not None else None # update_stock_asset_and_quote handles None quotes_df gracefully
+                    hist_to_pass = {ticker: historical_data} if historical_data is not None and not historical_data.empty else {}
+                    update_stock_asset_and_quote(quotes_to_pass, hist_to_pass, upsert=True) # Delta sync must upsert
+                    message = f"Delta sync completed for stock ticker {ticker} using {data_source}."
+                    if historical_data is None or historical_data.empty:
+                        message += " (No new historical data found)."
+                    return jsonify({"message": message})
                 else:
-                    return jsonify({"error": f"Failed to fetch delta data for stock ticker {ticker} from {data_source}"}), 404
+                    # No data at all was fetched
+                    return jsonify({"error": f"Failed to fetch any delta data for stock ticker {ticker} from {data_source}"}), 404
 
             elif asset_type == "CRYPTO":
                 if not data_source or data_source.upper() != "BINANCE":
@@ -757,48 +825,120 @@ def sync_delta():
                 from sync import update_crypto_asset_and_quote
                 from config import REQUEST_DELAY_SECONDS
 
-                # Still need metadata lookup for the symbol
-                coins = fetch_coingecko_data()
-                time.sleep(REQUEST_DELAY_SECONDS)
-                coin_data = next((coin for coin in coins if coin.get("id", "").lower() == ticker.lower()), None)
+                # Still need metadata lookup for the symbol, but maybe only if Asset doesn't exist?
+                # For delta, let's assume the asset exists and primarily fetch OHLCV.
+                # We might still need the coingecko ID -> Binance symbol mapping.
+                # Optimization: Query DB first? For now, keep CG lookup for simplicity.
+                session = Session()
+                asset_quote = session.query(AssetQuote).filter(
+                    AssetQuote.ticker == ticker, # Use the unified ticker
+                    AssetQuote.from_asset_type == 'CRYPTO' # Ensure it's a crypto quote
+                ).first()
+                session.close()
 
-                if not coin_data:
-                    return jsonify({"error": f"Metadata not found for crypto ID '{ticker}' on CoinGecko"}), 404
+                if not asset_quote:
+                     # Fallback: Try CoinGecko lookup if not found via unified ticker directly
+                     coins = fetch_coingecko_data()
+                     time.sleep(REQUEST_DELAY_SECONDS)
+                     coin_data = next((coin for coin in coins if coin.get("id", "").lower() == ticker.lower()), None)
+                     if not coin_data:
+                         return jsonify({"error": f"Crypto ticker '{ticker}' not found in AssetQuote or via CoinGecko ID lookup"}), 404
+                     binance_symbol = coin_data.get("symbol", "").upper() + "USDT"
+                     coingecko_id_for_update = ticker # Use the provided ticker as the ID key
+                     coin_data_list_for_update = [coin_data] # Wrap for update function
+                else:
+                     # Found via AssetQuote, use its source_ticker (which should be CoinGecko ID)
+                     # and derive Binance symbol from its 'from_asset_symbol'
+                     binance_symbol = asset_quote.from_asset_symbol.upper() + "USDT" # Assumes from_asset_symbol is like 'BTC'
+                     coingecko_id_for_update = asset_quote.source_ticker # This is the key for historical data map
+                     # We don't strictly need coin_data if just updating OHLCV, but update func expects it.
+                     # Pass minimal data or refactor update func? Pass minimal data for now.
+                     coin_data_list_for_update = [{"id": asset_quote.source_ticker, "symbol": asset_quote.from_asset_symbol, "name": asset_quote.from_asset.name}]
 
-                binance_symbol = coin_data.get("symbol", "").upper() + "USDT"
-                # Fetch recent data
+
+                # Fetch recent OHLCV data
                 historical_df = fetch_binance_crypto_data(binance_symbol, start_date_str, end_date_str)
 
                 if historical_df is not None:
-                    update_crypto_asset_and_quote([coin_data], {ticker: historical_df}, upsert=True)
-                    return jsonify({"message": f"Delta sync initiated for crypto ID {ticker} (Symbol: {binance_symbol}) using CoinGecko/Binance."})
+                    # update_crypto_asset_and_quote might need adjustment if coin_data_list is minimal
+                    update_crypto_asset_and_quote(coin_data_list_for_update, {coingecko_id_for_update: historical_df}, upsert=True)
+                    message = f"Delta sync completed for crypto ticker {ticker} (Symbol: {binance_symbol}) using Binance."
+                    if historical_df.empty:
+                        message += " (No new historical data found)."
+                    return jsonify({"message": message})
                 else:
+                    # fetch_binance_crypto_data returned None (error)
                     return jsonify({"error": f"Failed to fetch delta historical data for {binance_symbol} from Binance"}), 404
 
             elif asset_type == "CURRENCY":
                  if not data_source or data_source.upper() != "ALPHAVANTAGE":
                     return jsonify({"error": "Invalid data source for CURRENCY. Supported: AlphaVantage"}), 400
                  # Call the specific currency delta sync function
-                 delta_sync_currency(ticker=ticker)
-                 return jsonify({"message": f"Delta sync initiated for currency ticker {ticker} using {data_source}."})
+                 # Assume delta_sync_currency handles errors or returns status message
+                 result_message = delta_sync_currency(ticker=ticker)
+                 if "error" in result_message.lower():
+                     return jsonify({"error": f"Failed during delta sync for currency {ticker}: {result_message}"}), 500
+                 elif "not found" in result_message.lower():
+                     return jsonify({"error": f"Currency ticker {ticker} not found or data unavailable: {result_message}"}), 404
+                 else:
+                     return jsonify({"message": f"Delta sync completed for currency ticker {ticker} using {data_source}. Details: {result_message}"})
 
             else:
                 return jsonify({"error": "Invalid asset_type for specific delta sync"}), 400
 
-        else: # Global delta sync
-            if asset_type == "STOCK":
-                delta_sync_stocks()
-                return jsonify({"message": "Global delta sync for stocks initiated."})
-            elif asset_type == "CRYPTO":
-                delta_sync_crypto()
-                return jsonify({"message": "Global delta sync for cryptocurrencies initiated."})
-            elif asset_type == "CURRENCY":
-                delta_sync_currency()
-                return jsonify({"message": "Global delta sync for currencies initiated."})
+        else: # Global delta sync for ALL applicable types
+            logger.info("Initiating global delta sync for Stocks, Crypto, and Currencies.")
+            results = {}
+            errors = {}
+
+            try:
+                logger.info("Starting global stock delta sync...")
+                delta_sync_stocks() # Assumes this function logs its own progress/errors
+                results["stocks"] = "Completed"
+                logger.info("Global stock delta sync finished.")
+            except Exception as e_stock:
+                logger.error(f"Error during global stock delta sync: {e_stock}\n{traceback.format_exc()}")
+                errors["stocks"] = str(e_stock)
+
+            time.sleep(1) # Small delay
+
+            try:
+                logger.info("Starting global crypto delta sync...")
+                delta_sync_crypto() # Assumes this function logs its own progress/errors
+                results["crypto"] = "Completed"
+                logger.info("Global crypto delta sync finished.")
+            except Exception as e_crypto:
+                logger.error(f"Error during global crypto delta sync: {e_crypto}\n{traceback.format_exc()}")
+                errors["crypto"] = str(e_crypto)
+
+            time.sleep(1) # Small delay
+
+            try:
+                logger.info("Starting global currency delta sync...")
+                # Assuming delta_sync_currency() returns a summary message or raises errors
+                sync_msg = delta_sync_currency()
+                results["currency"] = f"Completed ({sync_msg})"
+                logger.info(f"Global currency delta sync finished: {sync_msg}")
+            except Exception as e_curr:
+                logger.error(f"Error during global currency delta sync: {e_curr}\n{traceback.format_exc()}")
+                errors["currency"] = str(e_curr)
+
+            response_message = "Global delta sync process finished."
+            status_code = 200
+            if errors:
+                response_message += " Errors occurred during sync."
+                return jsonify({
+                    "message": response_message,
+                    "sync_results": results,
+                    "sync_errors": errors
+                }), status_code
             else:
-                 logger.warning(f"Invalid asset_type '{asset_type}' for global delta sync, defaulting to STOCK.")
-                 delta_sync_stocks()
-                 return jsonify({"message": "Global delta sync for stocks initiated (defaulted)."})
+                response_message += " All syncs completed successfully."
+                return jsonify({
+                    "message": response_message,
+                    "sync_results": results
+                }), status_code
+            # Removed previous default/conditional logic
 
     except ValueError as ve:
         logger.warning(f"Value error during delta sync: {ve}")
