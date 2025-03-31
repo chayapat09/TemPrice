@@ -1,3 +1,4 @@
+# --- app.py ---
 import re
 from config import HISTORICAL_START_DATE
 from flask import Flask, jsonify, request, render_template
@@ -15,6 +16,10 @@ from data_fetchers import StockDataSource, CryptoDataSource, CurrencyDataSource
 from derived_datasource import DerivedDataSource
 from sqlalchemy.exc import SQLAlchemyError
 import traceback
+
+# Import the specific update function needed in the corrected sync endpoints
+from sync import update_stock_asset_and_quote
+
 logger = logging.getLogger(__name__) # Use __name__
 api_stats = Counter()
 app = Flask(__name__) # Use __name__
@@ -48,11 +53,11 @@ def get_unified_ticker():
             # Use the DataSource method to get the latest price (handles caching internally)
             latest_price_result = None
             if asset_quote.from_asset_type == "STOCK":
-                 latest_price_result = StockDataSource.get_latest_price(asset_quote.source_ticker)
+                  latest_price_result = StockDataSource.get_latest_price(asset_quote.source_ticker)
             elif asset_quote.from_asset_type == "CRYPTO":
-                 latest_price_result = CryptoDataSource.get_latest_price(asset_quote.source_ticker)
+                  latest_price_result = CryptoDataSource.get_latest_price(asset_quote.source_ticker)
             elif asset_quote.from_asset_type == "CURRENCY":
-                 latest_price_result = CurrencyDataSource.get_latest_price(asset_quote.source_ticker)
+                  latest_price_result = CurrencyDataSource.get_latest_price(asset_quote.source_ticker)
 
             # Get cache timestamp if entry exists
             cache_entry = latest_cache.get(ds_key)
@@ -566,8 +571,8 @@ def get_tickers():
             # Simple alphabetical sort for non-fuzzy
             # Need to handle AssetQuote vs DerivedTicker having different attributes for sorting
             def sort_key(r):
-                t = r.ticker if hasattr(r, 'ticker') else ''
-                return t.lower()
+                 t = r.ticker if hasattr(r, 'ticker') else ''
+                 return t.lower()
 
             unique_results = sorted(list(unique_results), key=sort_key)
             final_results = unique_results[offset : offset + limit]
@@ -634,19 +639,31 @@ def sync_full():
                     return jsonify({"error": "Invalid data source for STOCK. Supported: YFINANCE"}), 400
                 # Use dedicated fetch function
                 from data_fetchers import fetch_yf_data_for_ticker
-                from sync import update_stock_asset_and_quote
+                # from sync import update_stock_asset_and_quote # Already imported at top
+
                 quotes_df, historical_data = fetch_yf_data_for_ticker(ticker, start_date=HISTORICAL_START_DATE) # Use config start date
-                if historical_data is not None and not historical_data.empty: # Check if historical data was fetched and not empty
-                    # Allow upsert=True for simplicity. It overwrites existing data on full sync.
-                    update_stock_asset_and_quote(quotes_df, {ticker: historical_data}, upsert=True)
-                    return jsonify({"message": f"Full sync completed for stock ticker {ticker} using {data_source}."})
-                else:
-                    # Check if quotes_df has info even if historical is empty
-                    if quotes_df is not None and not quotes_df.empty:
-                         update_stock_asset_and_quote(quotes_df, {}, upsert=True) # Save quote info
-                         return jsonify({"warning": f"Quote info synced for {ticker}, but no historical data found from {data_source} for the period."}), 200
+
+                # --- Start of UPDATED block for single stock ---
+                quote_data_exists = quotes_df is not None and not quotes_df.empty
+                # Check if historical data exists AND the relevant ticker key points to a non-empty DataFrame
+                hist_data_exists = historical_data is not None and ticker in historical_data and historical_data[ticker] is not None and not historical_data[ticker].empty
+
+                if quote_data_exists or hist_data_exists:
+                    # Pass historical_data directly if it exists and is valid, otherwise pass an empty dict
+                    hist_to_pass = historical_data if hist_data_exists else {}
+                    quotes_to_pass = quotes_df if quote_data_exists else None # update func handles None quotes_df
+
+                    update_stock_asset_and_quote(quotes_to_pass, hist_to_pass, upsert=True)
+
+                    if hist_data_exists:
+                         return jsonify({"message": f"Full sync completed for stock ticker {ticker} using {data_source}."})
                     else:
-                         return jsonify({"error": f"Failed to fetch any data for stock ticker {ticker} from {data_source}"}), 404
+                         # Only quote info was synced
+                         return jsonify({"warning": f"Quote info synced for {ticker}, but no historical data found from {data_source} for the period."}), 200
+                else:
+                     # Neither quote nor historical data found
+                     return jsonify({"error": f"Failed to fetch any data for stock ticker {ticker} from {data_source}"}), 404
+                # --- End of UPDATED block ---
 
             elif asset_type == "CRYPTO":
                  # NOTE: Syncing a single crypto requires fetching its metadata first (CoinGecko)
@@ -799,23 +816,32 @@ def sync_delta():
                 if not data_source or data_source.upper() != "YFINANCE":
                     return jsonify({"error": "Invalid data source for STOCK. Supported: YFINANCE"}), 400
                 from data_fetchers import fetch_yf_data_for_ticker
-                from sync import update_stock_asset_and_quote
+                # from sync import update_stock_asset_and_quote # Already imported at top
+
                 # Fetch only recent data
                 quotes_df, historical_data = fetch_yf_data_for_ticker(ticker, start_date=start_date_str, end_date=end_date_str)
+
+                # --- Start of UPDATED block for single stock ---
                 # Check if any data was fetched (either quote or historical)
-                if (quotes_df is not None and not quotes_df.empty) or \
-                   (historical_data is not None and not historical_data.empty):
-                    # Pass empty dict/df if None was returned
-                    quotes_to_pass = quotes_df if quotes_df is not None else None # update_stock_asset_and_quote handles None quotes_df gracefully
-                    hist_to_pass = {ticker: historical_data} if historical_data is not None and not historical_data.empty else {}
-                    update_stock_asset_and_quote(quotes_to_pass, hist_to_pass, upsert=True) # Delta sync must upsert
+                quote_data_exists = quotes_df is not None and not quotes_df.empty
+                # Check if historical data exists AND the relevant ticker key points to a non-empty DataFrame
+                hist_data_exists = historical_data is not None and ticker in historical_data and historical_data[ticker] is not None and not historical_data[ticker].empty
+
+                if quote_data_exists or hist_data_exists:
+                     # Pass historical_data directly if it exists and is valid, otherwise pass an empty dict
+                    hist_to_pass = historical_data if hist_data_exists else {}
+                    quotes_to_pass = quotes_df if quote_data_exists else None # update func handles None quotes_df
+
+                    update_stock_asset_and_quote(quotes_to_pass, hist_to_pass, upsert=True)
+
                     message = f"Delta sync completed for stock ticker {ticker} using {data_source}."
-                    if historical_data is None or historical_data.empty:
+                    if not hist_data_exists:
                         message += " (No new historical data found)."
                     return jsonify({"message": message})
                 else:
-                    # No data at all was fetched
-                    return jsonify({"error": f"Failed to fetch any delta data for stock ticker {ticker} from {data_source}"}), 404
+                     # No data at all was fetched
+                     return jsonify({"error": f"Failed to fetch any delta data for stock ticker {ticker} from {data_source}"}), 404
+                # --- End of UPDATED block ---
 
             elif asset_type == "CRYPTO":
                 if not data_source or data_source.upper() != "BINANCE":
@@ -872,16 +898,16 @@ def sync_delta():
 
             elif asset_type == "CURRENCY":
                  if not data_source or data_source.upper() != "ALPHAVANTAGE":
-                    return jsonify({"error": "Invalid data source for CURRENCY. Supported: AlphaVantage"}), 400
+                     return jsonify({"error": "Invalid data source for CURRENCY. Supported: AlphaVantage"}), 400
                  # Call the specific currency delta sync function
                  # Assume delta_sync_currency handles errors or returns status message
                  result_message = delta_sync_currency(ticker=ticker)
                  if "error" in result_message.lower():
-                     return jsonify({"error": f"Failed during delta sync for currency {ticker}: {result_message}"}), 500
+                      return jsonify({"error": f"Failed during delta sync for currency {ticker}: {result_message}"}), 500
                  elif "not found" in result_message.lower():
-                     return jsonify({"error": f"Currency ticker {ticker} not found or data unavailable: {result_message}"}), 404
+                      return jsonify({"error": f"Currency ticker {ticker} not found or data unavailable: {result_message}"}), 404
                  else:
-                     return jsonify({"message": f"Delta sync completed for currency ticker {ticker} using {data_source}. Details: {result_message}"})
+                      return jsonify({"message": f"Delta sync completed for currency ticker {ticker} using {data_source}. Details: {result_message}"})
 
             else:
                 return jsonify({"error": "Invalid asset_type for specific delta sync"}), 400
@@ -976,14 +1002,14 @@ def create_derived_ticker():
 
     # Basic validation (more robust validation happens on eval)
     if not re.match(r"^[A-Z0-9._-]+$", ticker): # Allow letters, numbers, dot, underscore, hyphen
-         return jsonify({"error": "Ticker contains invalid characters. Use A-Z, 0-9, ., _, -"}), 400
+        return jsonify({"error": "Ticker contains invalid characters. Use A-Z, 0-9, ., _, -"}), 400
 
     session = Session()
     try:
         # Check if ticker conflicts with existing AssetQuote ticker
         quote_exists = session.query(AssetQuote).filter_by(ticker=ticker).first()
         if quote_exists:
-             return jsonify({"error": f"Ticker '{ticker}' is already used by a standard asset quote."}), 400
+            return jsonify({"error": f"Ticker '{ticker}' is already used by a standard asset quote."}), 400
 
         # Check if derived ticker already exists
         exists = session.query(DerivedTicker).filter_by(ticker=ticker).first()
@@ -1127,8 +1153,8 @@ def preview_derived_ticker():
         })
 
     except ValueError as ve: # Catch errors from safe_eval_expr or ticker extraction
-         logger.warning(f"Error during derived preview evaluation for formula '{formula}': {ve}")
-         return jsonify({"error": f"Evaluation error: {str(ve)}"}), 400
+        logger.warning(f"Error during derived preview evaluation for formula '{formula}': {ve}")
+        return jsonify({"error": f"Evaluation error: {str(ve)}"}), 400
     except Exception as e:
         logger.error(f"Unexpected error during derived preview for formula '{formula}': {e}\n{traceback.format_exc()}")
         return jsonify({"error": f"An unexpected error occurred during preview: {str(e)}"}), 500
@@ -1165,11 +1191,11 @@ if __name__ == "__main__":
         # WARNING: This will WIPE the database if it exists but is empty or partially populated.
         # Only enable this if you understand the consequences.
         # if assets_count == 0 or asset_quotes_count == 0:
-        # 	 logger.warning("Asset or AssetQuote count is zero. Recreating all tables.")
-        # 	 Base.metadata.drop_all(engine)
-        # 	 Base.metadata.create_all(engine)
+        #    logger.warning("Asset or AssetQuote count is zero. Recreating all tables.")
+        #    Base.metadata.drop_all(engine)
+        #    Base.metadata.create_all(engine)
         # else:
-        #     logger.info("Database tables seem populated. Skipping recreation.")
+        #    logger.info("Database tables seem populated. Skipping recreation.")
         Base.metadata.create_all(engine) # Ensure tables exist without dropping
     except Exception as db_init_e:
         logger.error(f"CRITICAL: Error during database initialization check: {db_init_e}\n{traceback.format_exc()}")
@@ -1186,8 +1212,8 @@ if __name__ == "__main__":
         load_query_counter() # Load historical query counts
         logger.info(f"Loaded query counter with {len(query_counter)} items.")
     except Exception as startup_e:
-         logger.error(f"Error during startup data population/refresh: {startup_e}\n{traceback.format_exc()}")
-         # Decide if this is critical enough to stop startup
+        logger.error(f"Error during startup data population/refresh: {startup_e}\n{traceback.format_exc()}")
+        # Decide if this is critical enough to stop startup
 
     # --- Scheduler Setup ---
     from config import (FLASK_HOST, FLASK_PORT,
@@ -1217,8 +1243,8 @@ if __name__ == "__main__":
         atexit.register(lambda: save_query_counter()) # Save counters on exit
 
     except Exception as sched_e:
-         logger.error(f"CRITICAL: Failed to start scheduler: {sched_e}\n{traceback.format_exc()}")
-         # Decide whether to proceed without the scheduler
+        logger.error(f"CRITICAL: Failed to start scheduler: {sched_e}\n{traceback.format_exc()}")
+        # Decide whether to proceed without the scheduler
 
     # --- Run Flask App ---
     logger.info(f"Starting Flask app on {FLASK_HOST}:{FLASK_PORT}")

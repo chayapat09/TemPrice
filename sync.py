@@ -1,3 +1,4 @@
+# --- Start of UPDATED sync.py ---
 import datetime
 import time
 import traceback
@@ -10,7 +11,7 @@ from utils import safe_convert, get_currency_list  # Added get_currency_list
 from sqlalchemy.exc import SQLAlchemyError
 import logging
 # Import necessary configs
-from config import REGULAR_TTL, HISTORICAL_START_DATE, REQUEST_DELAY_SECONDS, MAX_TICKERS_PER_REQUEST, TOP_N_TICKERS
+from config import REGULAR_TTL, HISTORICAL_START_DATE, REQUEST_DELAY_SECONDS, MAX_TICKERS_PER_REQUEST, TOP_N_TICKERS, NOT_FOUND_TTL # Added NOT_FOUND_TTL
 from cache_storage import latest_cache, last_cache_refresh  # Corrected import
 import yfinance as yf
 
@@ -61,6 +62,11 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
             session.flush()  # Ensure it's available
 
         # Process tickers from quotes_df
+        # Ensure quotes_df is not None before accessing columns
+        if quotes_df is None or quotes_df.empty:
+             logger.warning("No stock quotes_df provided to process.")
+             return # Exit if no quote data
+
         tickers_to_process = quotes_df["symbol"].dropna().unique().tolist()
         if not tickers_to_process:
             logger.warning(
@@ -93,8 +99,8 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
                 else:
                     currency = "USD"
             # Add more mappings if needed
-            ticker_currency_map[ticker] = currency
-            required_currencies.add(currency)
+            ticker_currency_map[ticker] = currency.upper() # Ensure uppercase
+            required_currencies.add(currency.upper())
 
         # Preload required currency assets
         existing_currency_assets = {asset.symbol: asset for asset in session.query(
@@ -167,7 +173,7 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
             if not currency_asset:
                 # Create missing currency asset (should be rare if prepopulated)
                 currency_asset = CurrencyAsset(asset_type="CURRENCY", symbol=quote_currency_code,
-                                               name=f"{quote_currency_code} (Auto-created)", source_asset_key=quote_currency_code)
+                                                name=f"{quote_currency_code} (Auto-created)", source_asset_key=quote_currency_code)
                 session.add(currency_asset)
                 existing_currency_assets[quote_currency_code] = currency_asset
                 logger.warning(
@@ -198,7 +204,8 @@ def update_stock_asset_and_quote(quotes_df, historical_data, upsert=False):
                 logger.debug(f"Using existing AssetQuote: {composite_ticker}")
 
             # --- OHLCV Update/Insert ---
-            if ticker in historical_data and historical_data[ticker] is not None and not historical_data[ticker].empty:
+            # Check historical_data exists and is not None
+            if historical_data and ticker in historical_data and historical_data[ticker] is not None and not historical_data[ticker].empty:
                 df = historical_data[ticker]
 
                 # Preload existing OHLCV for this *specific* quote ID for efficiency within loop if needed often
@@ -441,7 +448,7 @@ def update_crypto_asset_and_quote(crypto_data, historical_data, upsert=False):
                 logger.debug(f"Using existing AssetQuote: {composite_ticker}")
 
             # --- OHLCV Update/Insert ---
-            if coin_id in historical_data and historical_data[coin_id] is not None and not historical_data[coin_id].empty:
+            if historical_data and coin_id in historical_data and historical_data[coin_id] is not None and not historical_data[coin_id].empty:
                 df = historical_data[coin_id]
                 new_records_maps = []
                 update_mappings = []
@@ -647,7 +654,7 @@ def update_currency_asset_and_quote(currency_list, historical_data, upsert=False
                 logger.debug(f"Using existing AssetQuote: {composite_ticker}")
 
             # --- OHLCV Update/Insert ---
-            if currency_code in historical_data and historical_data[currency_code] is not None and not historical_data[currency_code].empty:
+            if historical_data and currency_code in historical_data and historical_data[currency_code] is not None and not historical_data[currency_code].empty:
                 df = historical_data[currency_code]
                 new_records_maps = []
                 update_mappings = []
@@ -788,22 +795,36 @@ def full_sync_stocks():
         quotes_df_th, historical_data_th = fetch_yf_data(
             MAX_TICKERS_PER_REQUEST, REQUEST_DELAY_SECONDS, query_th, start_date=HISTORICAL_START_DATE)
         logger.info(
-            f"Fetched data for Thai stocks: {len(quotes_df_th)} quotes.")
+            f"Fetched data for Thai stocks: {len(quotes_df_th) if quotes_df_th is not None else 0} quotes.")
 
         query_us = yf.EquityQuery("is-in", ["exchange", "NMS", "NYQ"])
         quotes_df_us, historical_data_us = fetch_yf_data(
             MAX_TICKERS_PER_REQUEST, REQUEST_DELAY_SECONDS, query_us, start_date=HISTORICAL_START_DATE)
-        logger.info(f"Fetched data for US stocks: {len(quotes_df_us)} quotes.")
+        logger.info(f"Fetched data for US stocks: {len(quotes_df_us) if quotes_df_us is not None else 0} quotes.")
 
-        if quotes_df_th.empty and quotes_df_us.empty:
+        quotes_to_concat = []
+        historical_data_combined = {}
+
+        if quotes_df_th is not None and not quotes_df_th.empty:
+            quotes_to_concat.append(quotes_df_th)
+        if historical_data_th:
+            historical_data_combined.update(historical_data_th)
+
+        if quotes_df_us is not None and not quotes_df_us.empty:
+             quotes_to_concat.append(quotes_df_us)
+        if historical_data_us:
+             historical_data_combined.update(historical_data_us)
+
+
+        if not quotes_to_concat:
             logger.warning("No stock data fetched during full sync.")
             return
 
-        quotes_df = pd.concat([quotes_df_th, quotes_df_us], ignore_index=True)
-        historical_data = {**historical_data_th, **historical_data_us}
+        quotes_df = pd.concat(quotes_to_concat, ignore_index=True)
+        # historical_data combined already
 
         # Use upsert=True for simplicity
-        update_stock_asset_and_quote(quotes_df, historical_data, upsert=True)
+        update_stock_asset_and_quote(quotes_df, historical_data_combined, upsert=True)
         _sync_common_update_state(sync_type="full")
         logger.info("Global Full Sync for Stocks Completed.")
     except Exception as e:
@@ -821,12 +842,14 @@ def delta_sync_stocks():
                         ).strftime("%Y-%m-%d")  # Include today
 
         # Fetch tickers that are already in the DB to delta sync them
+        stock_tickers_th = []
+        stock_tickers_us = []
         session = Session()
         try:
-            stock_tickers_th = [a.symbol for a in session.query(
-                StockAsset.symbol).filter(StockAsset.region == 'th').all()]
-            stock_tickers_us = [a.symbol for a in session.query(
-                StockAsset.symbol).filter(StockAsset.exchange.in_(['NMS', 'NYQ'])).all()]
+            stock_tickers_th = [a[0] for a in session.query(
+                StockAsset.symbol).filter(StockAsset.region == 'th').all()] # Use index 0 for tuple
+            stock_tickers_us = [a[0] for a in session.query(
+                StockAsset.symbol).filter(StockAsset.exchange.in_(['NMS', 'NYQ'])).all()] # Use index 0 for tuple
         finally:
             session.close()
 
@@ -841,22 +864,24 @@ def delta_sync_stocks():
             quotes_df_th, hist_th = fetch_yf_data(MAX_TICKERS_PER_REQUEST, REQUEST_DELAY_SECONDS, None,  # Don't need query, provide symbols
                                                   start_date=start_date_str, end_date=end_date_str,
                                                   ticker_list=stock_tickers_th)  # Pass explicit list
-            if not quotes_df_th.empty:
+            if quotes_df_th is not None and not quotes_df_th.empty:
                 all_quotes_list.append(quotes_df_th)
-            historical_data_combined.update(hist_th)
+            if hist_th:
+                historical_data_combined.update(hist_th)
             logger.info(
-                f"Delta sync - Fetched TH: {len(quotes_df_th)} quotes, {len(hist_th)} historical.")
+                f"Delta sync - Fetched TH: {len(quotes_df_th) if quotes_df_th is not None else 0} quotes, {len(hist_th) if hist_th else 0} historical.")
 
         # Fetch US data
         if stock_tickers_us:
             quotes_df_us, hist_us = fetch_yf_data(MAX_TICKERS_PER_REQUEST, REQUEST_DELAY_SECONDS, None,
                                                   start_date=start_date_str, end_date=end_date_str,
                                                   ticker_list=stock_tickers_us)
-            if not quotes_df_us.empty:
+            if quotes_df_us is not None and not quotes_df_us.empty:
                 all_quotes_list.append(quotes_df_us)
-            historical_data_combined.update(hist_us)
+            if hist_us:
+                historical_data_combined.update(hist_us)
             logger.info(
-                f"Delta sync - Fetched US: {len(quotes_df_us)} quotes, {len(hist_us)} historical.")
+                f"Delta sync - Fetched US: {len(quotes_df_us) if quotes_df_us is not None else 0} quotes, {len(hist_us) if hist_us else 0} historical.")
 
         if not all_quotes_list:
             logger.warning("No stock data fetched during delta sync.")
@@ -979,6 +1004,7 @@ def delta_sync_crypto():
 
 
 def full_sync_currency(ticker=None):
+    result_message = "" # Initialize return message
     if ticker:
         logger.info(f"Starting Full Sync for Currency: {ticker}...")
     else:
@@ -986,16 +1012,22 @@ def full_sync_currency(ticker=None):
 
     try:
         currency_list = get_currency_list()  # Get codes and names
+        if not currency_list: # Check if list is empty after loading
+             logger.error("Failed to load currency list from source. Aborting sync.")
+             return "Error: Failed to load currency list from source."
+
         if ticker:
+            original_currency_list_len = len(currency_list)
             currency_list = [
                 (code, name) for code, name in currency_list if code.upper() == ticker.upper()]
             if not currency_list:
-                logger.error(f"Ticker '{ticker}' not found in currency list.")
-                raise ValueError(f"Currency ticker '{ticker}' not found")
+                logger.error(f"Ticker '{ticker}' not found in loaded currency list (source list size: {original_currency_list_len}).")
+                # Raise error so it gets caught by except block below and returns message
+                raise ValueError(f"Currency ticker '{ticker}' not found in loaded list")
 
-        if not currency_list:
+        if not currency_list: # Should not happen if check above worked, but double check
             logger.warning("No currencies found to sync.")
-            return
+            return "Warning: No currencies found to sync." # Return a message
 
         historical_data = {}
         for currency_code, _ in currency_list:
@@ -1033,15 +1065,22 @@ def full_sync_currency(ticker=None):
             currency_list, historical_data, upsert=True)  # Use upsert=True
         _sync_common_update_state(sync_type="full")
         if ticker:
-            logger.info(f"Full Sync for Currency {ticker} Completed.")
+            result_message = f"Full Sync for Currency {ticker} Completed."
+            logger.info(result_message)
         else:
-            logger.info("Global Full Sync for Currencies Completed.")
+            result_message = f"Global Full Sync for {len(currency_list)} Currencies Completed."
+            logger.info(result_message)
+        return result_message # Return success message
+
     except Exception as e:
         logger.error(
             f"Currency Full Sync Failed: {e}\n{traceback.format_exc()}")
+        # --- MODIFIED: Return error string ---
+        return f"Error during currency full sync: {str(e)}"
 
 
 def delta_sync_currency(ticker=None):
+    result_message = "" # Initialize return message
     if ticker:
         logger.info(f"Starting Delta Sync for Currency: {ticker}...")
     else:
@@ -1053,16 +1092,22 @@ def delta_sync_currency(ticker=None):
         outputsize = "compact"
 
         currency_list = get_currency_list()
+        if not currency_list: # Check if list is empty after loading
+             logger.error("Failed to load currency list from source. Aborting sync.")
+             return "Error: Failed to load currency list from source."
+
         if ticker:
+            original_currency_list_len = len(currency_list)
             currency_list = [
                 (code, name) for code, name in currency_list if code.upper() == ticker.upper()]
             if not currency_list:
-                logger.error(f"Ticker '{ticker}' not found in currency list.")
-                raise ValueError(f"Currency ticker '{ticker}' not found")
+                logger.error(f"Ticker '{ticker}' not found in loaded currency list (source list size: {original_currency_list_len}).")
+                # Raise error so it gets caught by except block below and returns message
+                raise ValueError(f"Currency ticker '{ticker}' not found in loaded list")
 
-        if not currency_list:
+        if not currency_list: # Should not happen if check above worked, but double check
             logger.warning("No currencies found for delta sync.")
-            return
+            return "Warning: No currencies found for delta sync." # Return a message
 
         historical_data = {}
         for currency_code, _ in currency_list:
@@ -1098,12 +1143,17 @@ def delta_sync_currency(ticker=None):
             currency_list, historical_data, upsert=True)
         _sync_common_update_state(sync_type="delta")
         if ticker:
-            logger.info(f"Delta Sync for Currency {ticker} Completed.")
+            result_message = f"Delta Sync for Currency {ticker} Completed."
+            logger.info(result_message)
         else:
-            logger.info("Global Delta Sync for Currencies Completed.")
+            result_message = f"Global Delta Sync for {len(currency_list)} Currencies Completed."
+            logger.info(result_message)
+        return result_message # Return success message
     except Exception as e:
         logger.error(
             f"Currency Delta Sync Failed: {e}\n{traceback.format_exc()}")
+        # --- MODIFIED: Return error string ---
+        return f"Error during currency delta sync: {str(e)}"
 
 
 # --- Cache Refresh Functions ---
@@ -1114,8 +1164,16 @@ def refresh_stock_top_n_tickers(query_counter, top_n, delay_t):
     session = Session()
     try:
         # Correctly extract tickers (t[0]) where asset_type (t[1]) is 'STOCK'
-        top_stock_keys = [t[0] for t, count in query_counter.most_common(
-            top_n * 2) if t[1] == "STOCK"][:top_n]  # Get more initially, filter, then limit
+        # Use try-except for safety in case key is not tuple
+        top_stock_keys = []
+        for t, count in query_counter.most_common(top_n * 2):
+             try:
+                 if t[1] == "STOCK":
+                      top_stock_keys.append(t[0])
+             except (TypeError, IndexError):
+                 logger.warning(f"Skipping invalid key in query_counter: {t}")
+        top_stock_keys = top_stock_keys[:top_n]
+
 
         if not top_stock_keys:
             logger.debug(
@@ -1218,7 +1276,7 @@ def refresh_all_latest_prices():
     refresh_stock_top_n_tickers(
         query_counter, TOP_N_TICKERS, REQUEST_DELAY_SECONDS)
     refresh_crypto_prices()
-    # refresh_currency_prices() # This is now handled by a separate, less frequent job by default
+    # refresh_currency_prices() # This is handled by a separate job by default
 
     # Update the global timestamp
     # Use importlib.reload if cache_storage might be modified elsewhere unexpectedly
@@ -1231,7 +1289,6 @@ def refresh_all_latest_prices():
         f"Cache refresh cycle completed in {duration:.2f} seconds. Last refresh set to: {last_cache_refresh}")
 
 # --- fetch_yf_data modification to accept ticker_list ---
-
 
 def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL_START_DATE, end_date=None, sample_size=None, ticker_list=None):
     logger.info("Starting data fetch from yfinance...")
@@ -1247,12 +1304,19 @@ def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL
             yf_tickers = yf.Tickers(" ".join(symbols))
             for symbol in symbols:
                 try:
-                    info = yf_tickers.tickers.get(symbol).info
+                    # Access info safely, handle potential missing tickers
+                    ticker_obj = yf_tickers.tickers.get(symbol.upper()) # yfinance often uses uppercase
+                    if not ticker_obj:
+                         logger.warning(f"No yfinance object returned for ticker {symbol}")
+                         continue
+                    info = ticker_obj.info
+
                     # Reconstruct a quote dict similar to screen output
                     quote = {
-                        "symbol": symbol,
+                        "symbol": symbol, # Keep original case from list? Or use info.get('symbol')? Use original from list.
                         "longName": info.get("longName"),
                         "displayName": info.get("displayName"),
+                        "currency": info.get("currency"), # Get currency if available
                         "language": info.get("language"),
                         "region": info.get("region"),
                         "quoteType": info.get("quoteType"),
@@ -1263,6 +1327,7 @@ def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL
                     }
                     all_quotes_list.append(quote)
                 except Exception as info_err:
+                    # Catch broader exceptions during info fetch
                     logger.warning(
                         f"Could not fetch info for ticker {symbol}: {info_err}")
             quotes_df = pd.DataFrame(all_quotes_list)
@@ -1275,10 +1340,15 @@ def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL
         size = sample_size if sample_size is not None else 250  # Default screen size
 
         if sample_size is not None:
-            result = yf.Tickers.screen(
-                query, offset=0, size=sample_size)  # Use class method
-            quotes = result.get("quotes", [])
-            all_quotes_list.extend(quotes)
+            try: # Wrap screen calls in try-except
+                result = yf.Tickers.screen(
+                    query, offset=0, size=sample_size)  # Use class method
+                quotes = result.get("quotes", [])
+                all_quotes_list.extend(quotes)
+            except Exception as screen_err:
+                 logger.error(f"Error during initial yfinance screen fetch: {screen_err}")
+                 # Return empty if initial fetch fails?
+                 return pd.DataFrame(), {}
         else:
             while True:
                 try:
@@ -1289,7 +1359,7 @@ def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL
                     all_quotes_list.extend(quotes)
                     offset += size
                     logger.debug(
-                        f"Fetched {len(quotes)} quotes, total {offset}...")
+                        f"Fetched {len(quotes)} quotes, total {len(all_quotes_list)}...")
                     time.sleep(0.5)  # Small delay between screen pages
                 except Exception as screen_err:
                     logger.error(
@@ -1302,11 +1372,16 @@ def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL
         logger.error("fetch_yf_data requires either a query or a ticker_list.")
         return pd.DataFrame(), {}
 
+    # Return early if no quotes were successfully gathered
+    if quotes_df.empty:
+        logger.warning("No quote data gathered, cannot download historical data.")
+        return quotes_df, {}
+
     # --- Fetch Historical Data ---
     historical_data = {}
-    symbols_to_download = quotes_df["symbol"].dropna().tolist()
+    symbols_to_download = quotes_df["symbol"].dropna().tolist() # Use symbols from the quotes actually gathered
     if not symbols_to_download:
-        logger.warning("No symbols identified to download historical data.")
+        logger.warning("No symbols identified from quotes to download historical data.")
         return quotes_df, {}
 
     from utils import chunk_list  # Local import ok here
@@ -1337,10 +1412,14 @@ def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL
                     0).unique().tolist()
                 for ticker in batch_symbols:
                     if ticker in available_tickers_in_response:
-                        ticker_data = data[ticker].dropna(
-                            how='all')  # Drop rows with all NaNs
-                        if not ticker_data.empty:
-                            historical_data[ticker] = ticker_data
+                        # Check if the column exists before accessing
+                        if ticker in data:
+                            ticker_data = data[ticker].dropna(
+                                how='all')  # Drop rows with all NaNs
+                            if not ticker_data.empty:
+                                historical_data[ticker] = ticker_data
+                        else:
+                             logger.debug(f"Column for ticker {ticker} missing in multi-index response (likely no data).")
                     # else: logger.debug(f"No data for {ticker} in multi-index response.")
             elif len(batch_symbols) == 1:
                 # Single ticker response, DataFrame columns are OHLCV etc.
@@ -1365,3 +1444,5 @@ def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL
     logger.info(
         f"Finished historical data download. Fetched for {len(historical_data)} symbols.")
     return quotes_df, historical_data
+
+# --- End of UPDATED sync.py ---
