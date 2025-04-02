@@ -121,16 +121,28 @@ def save_query_counter():
 # --- Currency List ---
 def get_currency_list():
     """Reads currency codes and names from a CSV file."""
+    logger.debug("Attempting to load currency list...") # Log start
     currency_list = []
     # Ensure path is relative to the script location or use absolute path
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    file_path = os.path.join(script_dir, "..", "data", "physical_currency_list.csv") # Go up one level from utils
+    file_path = os.path.join(script_dir, "data", "physical_currency_list.csv") # Go up one level from utils
+    logger.debug(f"Calculated currency list file path: {file_path}") # Log calculated path
 
     if os.path.exists(file_path):
+        logger.debug(f"File found at: {file_path}") # Log file found
         try:
             with open(file_path, mode='r', newline='', encoding='utf-8') as csvfile:
+                logger.debug("Successfully opened file. Reading headers...") # Log file opened
                 # Detect header names automatically
                 reader = csv.DictReader(csvfile)
+
+                # Log the exact fieldnames read by DictReader
+                if reader.fieldnames:
+                     logger.debug(f"CSV DictReader fieldnames: {reader.fieldnames}")
+                else:
+                     logger.warning("CSV DictReader could not detect fieldnames (empty file or header issue?).")
+                     return [] # Return empty if no fieldnames
+
                 # Try different common header names
                 code_headers = ["currency code", "Currency Code", "code"]
                 name_headers = ["currency name", "Currency Name", "name"]
@@ -138,21 +150,44 @@ def get_currency_list():
                 actual_code_header = next((h for h in code_headers if h in reader.fieldnames), None)
                 actual_name_header = next((h for h in name_headers if h in reader.fieldnames), None)
 
-                if not actual_code_header or not actual_name_header:
-                     logger.error(f"Could not find required headers ({code_headers} / {name_headers}) in {file_path}")
-                     return []
+                # Log detected headers
+                logger.debug(f"Detected headers: Code='{actual_code_header}', Name='{actual_name_header}'")
 
+                if not actual_code_header or not actual_name_header:
+                    # Use ERROR level as this prevents loading
+                    logger.error(f"Could not find required headers ({code_headers} / {name_headers}) in {file_path}. Fieldnames found: {reader.fieldnames}")
+                    return [] # Return empty list
+
+                logger.debug("Processing CSV rows...") # Log start of row processing
+                row_count = 0
                 for row in reader:
+                    row_count += 1
+                    # Log the first few rows for inspection
+                    if row_count <= 3:
+                         logger.debug(f"Processing row {row_count} data (raw): {row}")
+
                     code = row.get(actual_code_header, "").strip().upper()
                     name = row.get(actual_name_header, "").strip()
                     if code and name:
                         currency_list.append((code, name))
+                    else:
+                        # Log if a row is skipped due to missing code or name
+                        logger.debug(f"Skipping row {row_count} due to missing code/name. Code='{code}', Name='{name}'")
+
+                logger.debug(f"Finished processing {row_count} rows. Found {len(currency_list)} valid currency pairs.") # Log completion
+
         except Exception as e:
+            # Log the exception with traceback
             logger.error(f"Error reading currency list file {file_path}: {e}", exc_info=True)
             return [] # Return empty list on error
     else:
-        logger.warning(f"Currency list file not found at {file_path}")
+        # Use WARNING level as the file is expected to exist
+        logger.warning(f"Currency list file not found at {file_path}. Cannot load currencies.")
+        # Return empty list implicitly here, but explicit is clearer
+        return []
 
+    # Log the final result before returning
+    logger.info(f"Returning currency list with {len(currency_list)} items.")
     return currency_list
 
 # --- Database Prepopulation ---
