@@ -1,0 +1,27 @@
+# docker-compose.yml
+version: '3.9' # Use a modern version
+
+services:
+  stockdata_app: # Renamed service for clarity
+    build: . # Build the image from the Dockerfile in the current directory
+    container_name: tem-price # Optional: Give the container a specific name
+    ports:
+      - "8082:8082" # Map host port 8082 to container port 8082 (matches config.py and Dockerfile)
+    volumes:
+      # Mount the host's directory (specified by DATA_DIR env var) to /app/instance inside the container
+      # This persists the SQLite DB (stock_data.db) and query_counts.json on the host machine.
+      - ${DATA_DIR}:/app/instance
+    environment:
+      # Ensure FLASK_ENV is set to production for waitress
+      - FLASK_ENV=production
+      # Pass AlphaVantage API key from .env file to the container environment
+      # Note: config.py needs to be adapted to read this from os.environ if you want to override it
+      # For now, config.py directly reads the key. If you modify config.py:
+      # - ALPHAVANTAGE_API_KEY=${ALPHAVANTAGE_API_KEY}
+    restart: unless-stopped # Restart the container if it stops, unless manually stopped
+    logging:
+      # Optional: Configure logging driver and options
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

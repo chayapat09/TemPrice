@@ -1,6 +1,10 @@
+# requirements.txt
 Flask
 SQLAlchemy
-yfinance
-APScheduler
+psycopg2-binary # Or your specific DB driver if not SQLite
 pandas
+yfinance
+requests>=2.25
+APScheduler
 rapidfuzz
+waitress>=2.1 # Production WSGI server

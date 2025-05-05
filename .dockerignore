@@ -1,0 +1,49 @@
+# .dockerignore
+
+# Git files
+.git
+.gitignore
+
+# Docker files
+Dockerfile
+docker-compose.yml
+.dockerignore
+.env
+
+# Python virtual environment
+.venv
+venv/
+*/venv/
+env/
+*/env/
+
+# Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*/*/__pycache__/
+*/*/*/__pycache__/
+
+# IDE / Editor specific files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Instance directory (data should be mounted via volume, not copied)
+instance/
+
+# Other build artifacts or local files
+dist/
+build/
+*.egg-info/
+*.log
+*.db # Exclude database files from being copied directly
+
+# Local development config overrides (if any)
+local_settings.py
