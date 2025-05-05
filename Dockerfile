@@ -46,4 +46,4 @@ EXPOSE 8082
 # waitress-serve --host=0.0.0.0 binds to all interfaces inside the container
 # --port=8082 matches the exposed port and config.py
 # app:app tells waitress to look for the 'app' object in the 'app.py' file
-CMD ["waitress-serve", "--host=0.0.0.0", "--port=8082", "app:app"]
+CMD ["python3", "app.py"]
