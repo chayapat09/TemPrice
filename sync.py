@@ -1244,28 +1244,76 @@ def refresh_crypto_prices():
 
 
 def refresh_currency_prices():
-    """Refreshes the cache for currency prices from AlphaVantage."""
-    logger.debug("Refreshing cache for currency prices...")
+    """
+    Refreshes the cache for currency prices using OpenExchangeRates via CurrencyDataSource.
+    Also, ensures CurrencyAsset entries exist for currencies found in OXR data.
+    """
+    logger.info("Refreshing currency prices cache (OpenExchangeRates)...")
     try:
-        currency_list = get_currency_list()
-        # Get only codes
-        codes = [code for code, name in currency_list if code]
-        if not codes:
-            logger.warning("No currency codes found to refresh.")
-            return
+        # CurrencyDataSource.refresh_latest_prices fetches from OXR and updates latest_cache
+        updated_prices_map = CurrencyDataSource.refresh_latest_prices() 
+        
+        if updated_prices_map:
+            logger.info(f"Currency cache refresh: Updated {len(updated_prices_map)} <QUOTE>USD pairs from OpenExchangeRates.")
 
-        # CurrencyDataSource.refresh_latest_prices calls get_latest_price repeatedly,
-        # which handles caching internally.
-        prices = CurrencyDataSource.refresh_latest_prices(codes)
-        updated_count = sum(1 for p in prices.values()
-                            if p != "NOT_FOUND" and p is not None)
-        not_found_count = sum(1 for p in prices.values() if p == "NOT_FOUND")
-        logger.info(
-            f"Currency cache refresh: Updated {updated_count} currencies, marked {not_found_count} as NOT_FOUND.")
+            # Prepopulate missing CurrencyAsset entries based on OXR data
+            session = None # Initialize session to None for finally block
+            try:
+                session = Session()
+                # Extract unique quote currency codes (e.g., "THB" from "THBUSD")
+                all_oxr_quote_currencies = set()
+                for ticker_key in updated_prices_map.keys():
+                    # Ensure ticker_key is a string and ends with USD but is not USDUSD
+                    if isinstance(ticker_key, str) and ticker_key.upper().endswith("USD") and len(ticker_key) > 3:
+                        if ticker_key.upper() != "USDUSD":
+                             all_oxr_quote_currencies.add(ticker_key[:-3].upper()) 
+                
+                all_oxr_quote_currencies.add("USD") # Ensure USD itself is considered for existence
+
+                if not all_oxr_quote_currencies:
+                    logger.debug("No quote currencies extracted from OXR refresh for asset prepopulation check.")
+                else:
+                    logger.info(f"Checking/prepopulating assets for {len(all_oxr_quote_currencies)} OXR quote currencies: {all_oxr_quote_currencies}")
+                    existing_db_symbols_query = session.query(CurrencyAsset.symbol).filter(
+                        CurrencyAsset.symbol.in_(list(all_oxr_quote_currencies))
+                    )
+                    existing_db_symbols = {asset_symbol_tuple[0] for asset_symbol_tuple in existing_db_symbols_query.all()}
+                    
+                    added_count = 0
+                    for code in all_oxr_quote_currencies:
+                        if code not in existing_db_symbols:
+                            # OXR doesn't provide full names, use code as placeholder
+                            # Full names can be populated from a CSV or other source during initial prepopulation
+                            currency_name = f"{code} (discovered via OXR)" 
+                            new_asset = CurrencyAsset(
+                                asset_type="CURRENCY", symbol=code,
+                                name=currency_name, 
+                                source_asset_key=code # For currencies, source_asset_key is often the code itself
+                            )
+                            session.add(new_asset)
+                            added_count += 1
+                            logger.info(f"Prepopulated new CurrencyAsset from OXR data: {code} - Name: {currency_name}")
+                    
+                    if added_count > 0:
+                        session.commit()
+                        logger.info(f"Committed {added_count} new currency assets based on OXR data.")
+                    else:
+                        logger.info("No new currency assets needed to be prepopulated from OXR data.")
+            
+            except SQLAlchemyError as db_err:
+                if session: session.rollback()
+                logger.error(f"Database error during currency asset prepopulation from OXR: {db_err}", exc_info=True)
+            except Exception as gen_err: # Catch any other unexpected errors
+                if session: session.rollback()
+                logger.error(f"Generic error during currency asset prepopulation from OXR: {gen_err}", exc_info=True)
+            finally:
+                if session and session.is_active: 
+                    session.close()
+        else:
+            logger.warning("Currency cache refresh from OpenExchangeRates did not result in any price updates.")
+
     except Exception as e:
-        logger.error(
-            f"Error refreshing currency prices cache: {e}\n{traceback.format_exc()}")
-
+        logger.error(f"Error in general refresh_currency_prices (OXR): {e}\n{traceback.format_exc()}")
 
 def refresh_all_latest_prices():
     """Main scheduled job to refresh caches for top stocks, crypto, and currencies."""

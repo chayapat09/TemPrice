@@ -6,11 +6,60 @@ import yfinance as yf
 from decimal import Decimal
 from utils import safe_convert, chunk_list
 import logging
-from config import HISTORICAL_START_DATE, REGULAR_TTL, NOT_FOUND_TTL
+from config import HISTORICAL_START_DATE, REGULAR_TTL, NOT_FOUND_TTL # OXR_APP_ID imported in methods
 from cache_storage import latest_cache
+from dataclasses import dataclass # Added
+from typing import Dict, Optional # Added
 
 logger = logging.getLogger(__name__)
 
+# --- Dataclass for OpenExchangeRates DTO ---
+@dataclass
+class ExchangeRatesDTO:
+    base: str                 # e.g. "USD"
+    rates: Dict[str, float]   # e.g. {"EUR":0.9234, "THB":35.4123, ...}
+    timestamp: datetime.datetime       # when the rates were last updated (made specific)
+
+# --- Fetch function for OpenExchangeRates ---
+def fetch_all_usd_rates_oxr(app_id: str) -> Optional[ExchangeRatesDTO]:
+    """
+    Calls OpenExchangeRates 'latest' endpoint for USD->ALL
+    and returns an ExchangeRatesDTO containing every currency rate.
+    Returns None on failure.
+    """
+    url = "https://openexchangerates.org/api/latest.json"
+    params = {"app_id": app_id}
+    logger.info(f"Fetching all USD rates from OpenExchangeRates with app_id ending in ...{app_id[-4:] if app_id else 'N/A'}")
+    try:
+        resp = requests.get(url, params=params, timeout=10) # Increased timeout slightly
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("base") != "USD":
+            logger.error(f"OpenExchangeRates API did not return USD as base. Base was: {data.get('base')}")
+            return None
+        
+        # Ensure rates is a dictionary
+        rates_data = data.get("rates")
+        if not isinstance(rates_data, dict):
+            logger.error(f"OpenExchangeRates API 'rates' field is not a dictionary. Type: {type(rates_data)}")
+            return None
+
+        return ExchangeRatesDTO(
+            base=data["base"],
+            rates=rates_data,
+            timestamp=datetime.datetime.fromtimestamp(data["timestamp"]) # Consider timezone awareness if critical
+        )
+    except requests.exceptions.HTTPError as http_err:
+        logger.error(f"HTTP error fetching from OpenExchangeRates: {http_err} - Response: {resp.text if 'resp' in locals() else 'N/A'}")
+        return None
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request error fetching from OpenExchangeRates: {e}")
+        return None
+    except (KeyError, TypeError, ValueError) as e: # Broader exception for data parsing
+        logger.error(f"Error parsing OpenExchangeRates response: {e}")
+        return None
+    
 def fetch_yf_data_for_ticker(ticker, start_date=HISTORICAL_START_DATE, end_date=None):
     logger.info(f"Fetching data for stock ticker: {ticker}")
     try:
@@ -175,9 +224,10 @@ def fetch_binance_crypto_data(symbol, start_date, end_date):
 # Data Source Classes for Latest Price Fetching
 
 class StockDataSource:
+    DS_NAME = "YFINANCE"
     @staticmethod
     def get_latest_price(ticker):
-        ds_name = "YFINANCE"
+        ds_name = StockDataSource.DS_NAME
         now = datetime.datetime.now()
         key = (ds_name, ticker)
         if key in latest_cache:
@@ -217,6 +267,7 @@ class StockDataSource:
         return prices
 
 class CryptoDataSource:
+    DS_NAME = "BINANCE"
     BASE_URL = "https://api.binance.com/api/v3"
 
     @staticmethod
@@ -327,37 +378,109 @@ def fetch_fx_daily_data(from_currency, to_currency="USD", outputsize="compact"):
         return None
 
 class CurrencyDataSource:
+    OXR_DS_NAME = "OPENEXCHANGERATES" # For OpenExchangeRates real-time data
+    ALPHAVANTAGE_DS_NAME = "ALPHAVANTAGE" # For AlphaVantage historical data
+
     @staticmethod
-    def get_latest_price(currency_code):
-        ds_name = "ALPHAVANTAGE"
+    def get_latest_price(currency_pair_ticker: str): # e.g., "EURUSD", "THBUSD"
+        """
+        Fetches the latest price for a currency pair like EURUSD or THBUSD.
+        Uses OpenExchangeRates data from cache.
+        The currency_pair_ticker is in <QUOTE><BASE> format (e.g., EURUSD means 1 EUR = X USD).
+        """
         now = datetime.datetime.now()
-        key = (ds_name, currency_code.upper())
-        if key in latest_cache:
-            price, timestamp, expires = latest_cache[key]
+        # Cache key is based on OXR as the source for these latest prices
+        key = (CurrencyDataSource.OXR_DS_NAME, currency_pair_ticker.upper())
+        
+        cached_item = latest_cache.get(key)
+        if cached_item:
+            price, timestamp, expires = cached_item
             if now < expires:
                 return price
             else:
+                logger.debug(f"Currency cache expired for {key} (OXR), removing.")
                 del latest_cache[key]
-        if currency_code.upper() == "USD":
+        
+        # If not in cache or expired, it means refresh_latest_prices should have populated it.
+        # This method primarily reads from the cache.
+        logger.warning(f"Latest price for {currency_pair_ticker} not found in OXR cache. Relies on periodic refresh job.")
+        
+        # Handle USDUSD explicitly as it's a common case and won't be in OXR's 'rates' for other currencies.
+        if currency_pair_ticker.upper() == "USDUSD":
             price = 1.0
-            expires = now + datetime.timedelta(minutes=REGULAR_TTL)
+            # Cache USDUSD for a longer period as it's constant
+            expires = now + datetime.timedelta(days=7) # Cache for a week
             latest_cache[key] = (price, now, expires)
             return price
-        price = fetch_fx_realtime(currency_code, "USD")
-        if price is not None:
-            expires = now + datetime.timedelta(minutes=REGULAR_TTL)
-            latest_cache[key] = (price, now, expires)
-            return price
-        else:
-            price = "NOT_FOUND"
-            expires = now + datetime.timedelta(minutes=NOT_FOUND_TTL)
-            latest_cache[key] = (price, now, expires)
-            return "NOT_FOUND"
+
+        # For other pairs, if not found by refresh job, mark as NOT_FOUND.
+        # The refresh job is responsible for fetching from OXR and populating.
+        price_to_cache = "NOT_FOUND"
+        expires = now + datetime.timedelta(minutes=NOT_FOUND_TTL) # Cache "NOT_FOUND"
+        latest_cache[key] = (price_to_cache, now, expires)
+        return price_to_cache
 
     @staticmethod
-    def refresh_latest_prices(currency_codes):
-        prices = {}
-        for code in currency_codes:
-            price = CurrencyDataSource.get_latest_price(code)
-            prices[code] = price if price is not None else "NOT_FOUND"
-        return prices
+    def refresh_latest_prices():
+        """
+        Fetches all USD-based rates from OpenExchangeRates, inverts them to <QUOTE>USD format,
+        and updates the latest_cache. This is the primary method for populating real-time currency cache.
+        Returns a dictionary of tickers and their successfully updated prices.
+        """
+        from config import OXR_APP_ID # Import here to ensure fresh config access
+        
+        if not OXR_APP_ID or ("e175a1fe5ec843eea664685474cd52e7" in OXR_APP_ID and "YOUR_APP_ID" in OXR_APP_ID): # Basic check for placeholder or default example key
+             logger.warning("OpenExchangeRates OXR_APP_ID is not configured or is a placeholder/example. Skipping currency refresh from OXR.")
+             return {}
+
+        oxr_dto = fetch_all_usd_rates_oxr(OXR_APP_ID)
+        prices_updated_map = {}
+        now = datetime.datetime.now()
+
+        if oxr_dto and oxr_dto.base == "USD":
+            logger.info(f"Fetched {len(oxr_dto.rates)} rates from OpenExchangeRates (base {oxr_dto.base}) at {oxr_dto.timestamp}.")
+            
+            # Handle USD against USD (e.g., USDUSD)
+            usdusd_ticker = "USDUSD"
+            usdusd_key = (CurrencyDataSource.OXR_DS_NAME, usdusd_ticker)
+            # Cache USDUSD for a long time as it's fixed at 1.0
+            usdusd_expires = now + datetime.timedelta(days=30) 
+            latest_cache[usdusd_key] = (1.0, now, usdusd_expires)
+            prices_updated_map[usdusd_ticker] = 1.0
+            logger.debug(f"Cached {usdusd_ticker}: 1.0")
+
+            for quote_currency_code, usd_to_quote_rate in oxr_dto.rates.items():
+                if quote_currency_code.upper() == "USD": # USD itself, rate is 1 to USD
+                    continue # Already handled by USDUSD
+
+                if usd_to_quote_rate is None or not isinstance(usd_to_quote_rate, (int, float)):
+                    logger.warning(f"Invalid rate type for USD{quote_currency_code} from OXR: {usd_to_quote_rate}. Skipping.")
+                    continue
+                if usd_to_quote_rate <= 0: # Rate must be positive for inversion
+                    logger.warning(f"Non-positive rate for USD{quote_currency_code} from OXR: {usd_to_quote_rate}. Cannot invert, skipping.")
+                    continue
+
+                # OXR provides: 1 USD = X QUOTE (e.g., USDTHB = 35.0)
+                # We need to store: 1 QUOTE = Y USD (e.g., THBUSD = 1/35.0)
+                try:
+                    quote_to_usd_rate = 1.0 / usd_to_quote_rate
+                except ZeroDivisionError: # Should be caught by previous check, but defensively
+                    logger.error(f"ZeroDivisionError for USD{quote_currency_code} rate {usd_to_quote_rate}. Skipping.")
+                    continue
+                
+                # Internal ticker convention: <QUOTE_CURRENCY>USD (e.g., THBUSD, EURUSD)
+                internal_pair_ticker = f"{quote_currency_code.upper()}USD"
+                cache_key = (CurrencyDataSource.OXR_DS_NAME, internal_pair_ticker)
+                
+                # Standard TTL for fetched rates
+                rate_expires = now + datetime.timedelta(minutes=REGULAR_TTL)
+                
+                latest_cache[cache_key] = (quote_to_usd_rate, now, rate_expires)
+                prices_updated_map[internal_pair_ticker] = quote_to_usd_rate
+                logger.debug(f"Cached {internal_pair_ticker}: {quote_to_usd_rate:.6f} (from OXR USD{quote_currency_code}={usd_to_quote_rate})")
+        else:
+            logger.error("Failed to fetch or validate data from OpenExchangeRates for currency refresh.")
+            if oxr_dto and oxr_dto.base != "USD": # Log if base is not USD
+                 logger.error(f"OXR base currency was {oxr_dto.base}, expected USD.")
+        
+        return prices_updated_map

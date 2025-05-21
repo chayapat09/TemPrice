@@ -8,3 +8,4 @@ requests>=2.25
 APScheduler
 rapidfuzz
 waitress>=2.1 # Production WSGI server
+python-dotenv

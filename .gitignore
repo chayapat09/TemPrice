@@ -54,3 +54,4 @@ override.tf.json
 
 venv/
 instance/
+.env

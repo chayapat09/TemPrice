@@ -8,7 +8,6 @@
 Dockerfile
 docker-compose.yml
 .dockerignore
-.env
 
 # Python virtual environment
 .venv

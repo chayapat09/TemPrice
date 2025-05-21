@@ -9,10 +9,6 @@ services:
     volumes:
       # Persist the SQLite DB and query_counts.json on the host
       - ${DATA_DIR}:/app/instance
-    environment:
-      - FLASK_ENV=production
-      # If you modify config.py to read from env:
-      # - ALPHAVANTAGE_API_KEY=${ALPHAVANTAGE_API_KEY}
     restart: unless-stopped
     logging:
       driver: "json-file"

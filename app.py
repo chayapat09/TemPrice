@@ -16,6 +16,9 @@ from data_fetchers import StockDataSource, CryptoDataSource, CurrencyDataSource
 from derived_datasource import DerivedDataSource
 from sqlalchemy.exc import SQLAlchemyError
 import traceback
+from config import (FLASK_HOST, FLASK_PORT, LATEST_CACHE_REFRESH_INTERVAL_MINUTES,
+                        DELTA_SYNC_INTERVAL_DAYS, QUERY_COUNTER_SAVE_INTERVAL_MINUTES,
+                        CURRENCY_CACHE_REFRESH_INTERVAL_MINUTES) # Ensure these are imported
 
 # Import the specific update function needed in the corrected sync endpoints
 from sync import update_stock_asset_and_quote
@@ -47,21 +50,32 @@ def get_unified_ticker():
         asset_quote = session.query(AssetQuote).filter_by(ticker=ticker).first()
 
         if asset_quote:
-            ohlcv_records = session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id).order_by(AssetOHLCV.price_date).all() # Ensure order
-            ds_key = (asset_quote.data_source.name.upper() if asset_quote.data_source else "UNKNOWN", asset_quote.source_ticker)
-
-            # Use the DataSource method to get the latest price (handles caching internally)
+            ohlcv_records = session.query(AssetOHLCV).filter_by(asset_quote_id=asset_quote.id).order_by(AssetOHLCV.price_date).all()
+            
+            data_source_name = asset_quote.data_source.name.upper() if asset_quote.data_source else "UNKNOWN"
+            source_ticker_for_cache = asset_quote.source_ticker # Default source ticker for cache key
+            
             latest_price_result = None
-            if asset_quote.from_asset_type == "STOCK":
-                  latest_price_result = StockDataSource.get_latest_price(asset_quote.source_ticker)
-            elif asset_quote.from_asset_type == "CRYPTO":
-                  latest_price_result = CryptoDataSource.get_latest_price(asset_quote.source_ticker)
-            elif asset_quote.from_asset_type == "CURRENCY":
-                  latest_price_result = CurrencyDataSource.get_latest_price(asset_quote.source_ticker)
+            ds_key_for_cache_ts = None # Cache key for fetching timestamp
 
-            # Get cache timestamp if entry exists
-            cache_entry = latest_cache.get(ds_key)
-            cache_timestamp = cache_entry[1].isoformat() if cache_entry and cache_entry[1] else None
+            if asset_quote.from_asset_type == "STOCK":
+                latest_price_result = StockDataSource.get_latest_price(asset_quote.source_ticker)
+                ds_key_for_cache_ts = (StockDataSource.DS_NAME, source_ticker_for_cache)
+            elif asset_quote.from_asset_type == "CRYPTO":
+                latest_price_result = CryptoDataSource.get_latest_price(asset_quote.source_ticker)
+                ds_key_for_cache_ts = (CryptoDataSource.DS_NAME, source_ticker_for_cache)
+            elif asset_quote.from_asset_type == "CURRENCY":
+                # For currency, get_latest_price expects the unified ticker (e.g., EURUSD)
+                latest_price_result = CurrencyDataSource.get_latest_price(asset_quote.ticker)
+                # Cache key for currency uses OXR_DS_NAME and the unified ticker
+                ds_key_for_cache_ts = (CurrencyDataSource.OXR_DS_NAME, asset_quote.ticker)
+            else: # Fallback for other types or if logic is extended
+                logger.warning(f"Unified endpoint: Unhandled asset type '{asset_quote.from_asset_type}' for latest price logic for ticker {ticker}")
+                ds_key_for_cache_ts = (data_source_name, source_ticker_for_cache)
+
+
+            cache_entry = latest_cache.get(ds_key_for_cache_ts) if ds_key_for_cache_ts else None
+            cache_timestamp = cache_entry[1].isoformat() if cache_entry and cache_entry[1] else None # cache_entry[1] is the timestamp
             latest_price = latest_price_result if isinstance(latest_price_result, (int, float)) else None
 
             unified_data = {
@@ -76,7 +90,7 @@ def get_unified_ticker():
                     "asset_type": asset_quote.to_asset_type,
                     "symbol": asset_quote.to_asset_symbol,
                 },
-                "latest_price": latest_price, # Use the result from DataSource
+                "latest_price": latest_price,
                 "latest_cache_timestamp": cache_timestamp, # Timestamp from cache
                 "historical_data": [
                     {
@@ -86,7 +100,7 @@ def get_unified_ticker():
                         "low": safe_convert(record.low_price, float),
                         "close": safe_convert(record.close_price, float),
                         "volume": safe_convert(record.volume, float),
-                        "value": safe_convert(record.close_price, float) # Standardized value field
+                        "value": safe_convert(record.close_price, float)
                     }
                     for record in ohlcv_records
                 ]
@@ -99,42 +113,33 @@ def get_unified_ticker():
                 return jsonify({"error": "Ticker not found"}), 404
 
             latest_price = None
-            latest_context = {} # For debugging/info
+            latest_context = {} 
             try:
-                # Use the method that also returns context for preview/debugging
                 latest_price, latest_context = DerivedDataSource.get_latest_price_with_context(ticker)
             except Exception as e:
-                logger.error(f"Error evaluating derived formula for {ticker}: {e}\n{traceback.format_exc()}")
+                logger.error(f"Error evaluating derived formula for {ticker} (unified): {e}\n{traceback.format_exc()}")
                 return jsonify({"error": f"Error evaluating formula: {str(e)}"}), 500
 
             historical_series = {}
             try:
                 historical_series = DerivedDataSource.get_historical_data(ticker)
             except Exception as e:
-                logger.error(f"Error fetching historical data for derived ticker {ticker}: {e}\n{traceback.format_exc()}")
-                # Return empty historical data instead of failing the whole request
+                logger.error(f"Error fetching historical data for derived ticker {ticker} (unified): {e}\n{traceback.format_exc()}")
                 historical_series = {}
 
             historical_data = [
                 {
-                    "date": d.isoformat(),
-                    "open": None, # Add null fields for consistency
-                    "high": None,
-                    "low": None,
-                    "close": value, # Use close for consistency with chart expectations? or keep 'value'? Let's use 'value'.
-                    "volume": None,
-                    "value": value
+                    "date": d.isoformat(), "open": None, "high": None, "low": None, 
+                    "close": value, "volume": None, "value": value
                  }
                 for d, value in historical_series.items()
             ]
+            historical_data.sort(key=lambda x: x['date']) # Ensure sorted data
 
             unified_data = {
-                "ticker": derived.ticker,
-                "formula": derived.formula,
-                "asset_type": "DERIVED",
-                "latest_price": latest_price,
-                "latest_context": latest_context, # Include context for info
-                "latest_cache_timestamp": datetime.datetime.now().isoformat(), # Derived is calculated now
+                "ticker": derived.ticker, "formula": derived.formula, "asset_type": "DERIVED",
+                "latest_price": latest_price, "latest_context": latest_context, 
+                "latest_cache_timestamp": datetime.datetime.now().isoformat(), 
                 "historical_data": historical_data
             }
             return jsonify(unified_data)
@@ -143,8 +148,8 @@ def get_unified_ticker():
         logger.error(f"Error fetching unified ticker data for {ticker}: {e}\n{traceback.format_exc()}")
         return jsonify({"error": "An internal error occurred"}), 500
     finally:
-        session.close()
-
+        if session.is_active:
+            session.close()
 
 @app.route("/api/data_quality")
 def data_quality():
@@ -180,122 +185,143 @@ def ticker_traffic():
 
 @app.route("/api/cache_info")
 def cache_info():
-    # Access the globally defined scheduler
-    global scheduler
+    global scheduler 
     try:
-        cache_job = scheduler.get_job("cache_refresh") if scheduler.running else None
-        next_cache_refresh_str = "Scheduler not running"
+        cache_job = scheduler.get_job("cache_refresh") if scheduler and scheduler.running else None
+        currency_cache_job = scheduler.get_job("currency_cache_refresh") if scheduler and scheduler.running else None
+        
+        next_main_refresh_str = "Scheduler not running or job 'cache_refresh' not found"
         if cache_job and cache_job.next_run_time:
-            # Make sure timezone comparison is handled correctly
             now_aware = datetime.datetime.now(cache_job.next_run_time.tzinfo)
-            if cache_job.next_run_time > now_aware:
-                diff_seconds = (cache_job.next_run_time - now_aware).total_seconds()
-                if diff_seconds >= 60:
-                    next_cache_refresh_str = f"in {int(diff_seconds // 60)} min {int(diff_seconds % 60)} sec"
-                else:
-                    next_cache_refresh_str = f"in {int(diff_seconds)} seconds"
+            diff_seconds = (cache_job.next_run_time - now_aware).total_seconds()
+            if diff_seconds >= 0:
+                 next_main_refresh_str = f"in {int(diff_seconds // 60)} min {int(diff_seconds % 60)} sec"
             else:
-                 next_cache_refresh_str = "Next run time is in the past (job might be running or delayed)"
-        elif cache_job:
-            next_cache_refresh_str = "Job exists but no next run time scheduled (may be paused or finished)"
-        else:
-            next_cache_refresh_str = "Job 'cache_refresh' not found or scheduler stopped"
+                 next_main_refresh_str = "Next run time is in the past (job might be running or delayed)"
+        
+        next_currency_refresh_str = "Scheduler not running or job 'currency_cache_refresh' not found"
+        if currency_cache_job and currency_cache_job.next_run_time:
+            now_aware_curr = datetime.datetime.now(currency_cache_job.next_run_time.tzinfo)
+            diff_seconds_curr = (currency_cache_job.next_run_time - now_aware_curr).total_seconds()
+            if diff_seconds_curr >=0:
+                next_currency_refresh_str = f"in {int(diff_seconds_curr // 60)} min {int(diff_seconds_curr % 60)} sec"
+            else:
+                next_currency_refresh_str = "Next run time is in the past (job might be running or delayed)"
 
     except Exception as e:
-        logger.error(f"Error getting scheduler info: {e}")
-        next_cache_refresh_str = "Error fetching next refresh time"
+        logger.error(f"Error getting scheduler info for cache: {e}")
+        next_main_refresh_str = "Error fetching next main refresh time"
+        next_currency_refresh_str = "Error fetching next currency refresh time"
 
     return jsonify({
-        "last_cache_refresh": last_cache_refresh.isoformat() if last_cache_refresh else "N/A",
-        "next_cache_refresh": next_cache_refresh_str,
-        "cache_size": len(latest_cache) # Add cache size
+        "last_cache_refresh_MAIN_STOCKS_CRYPTO": last_cache_refresh.isoformat() if last_cache_refresh else "N/A",
+        "next_main_cache_refresh": next_main_refresh_str,
+        "next_currency_cache_refresh_OXR": next_currency_refresh_str, # OXR is the source for this job
+        "cache_size_TOTAL": len(latest_cache),
+        "cache_size_STOCK_YF": sum(1 for k_tuple in latest_cache if k_tuple[0] == StockDataSource.DS_NAME),
+        "cache_size_CRYPTO_BINANCE": sum(1 for k_tuple in latest_cache if k_tuple[0] == CryptoDataSource.DS_NAME),
+        "cache_size_CURRENCY_OXR": sum(1 for k_tuple in latest_cache if k_tuple[0] == CurrencyDataSource.OXR_DS_NAME),
+        # ALPHAVANTAGE might still be in cache if historical lookups are cached or if old logic was used
+        "cache_size_CURRENCY_AV_HIST_PROXY": sum(1 for k_tuple in latest_cache if k_tuple[0] == CurrencyDataSource.ALPHAVANTAGE_DS_NAME), 
     })
-
 
 @app.route("/api/latest")
 def get_latest():
     ticker = request.args.get("ticker")
-    asset_type = request.args.get("asset_type", "STOCK").upper() # Default remains STOCK
+    asset_type_param = request.args.get("asset_type", "STOCK").upper() 
 
     if not ticker:
         return jsonify({"error": "Ticker parameter is required"}), 400
-
-    # Update query counter for latest endpoint
-    # Consider moving this logic if it causes issues with concurrent requests
-    query_counter[(ticker, asset_type)] += 1
-
-    session = Session() # Keep session for AssetQuote lookup needed for non-derived
+    
+    session = Session()
     try:
-        if asset_type == "DERIVED":
-            session.close() # Not needed for derived evaluation itself
-            derived = session.query(DerivedTicker).filter_by(ticker=ticker).first() # Need session again briefly
-            session.close() # Close after query
-            if not derived:
-                return jsonify({"error": "Derived ticker not found"}), 404
+        # Attempt to identify if it's a derived ticker first
+        # especially if asset_type_param suggests it or if it's not found in AssetQuote later.
+        derived_check = session.query(DerivedTicker.ticker).filter_by(ticker=ticker).first()
+        if derived_check: # It is a known derived ticker
+            session.close() 
+            query_counter[(ticker, "DERIVED")] += 1
             try:
-                # Use the simpler get_latest_price here, context not needed for this endpoint
                 result = DerivedDataSource.get_latest_price(ticker)
-                if result == "NOT_FOUND" or result is None: # Handle cases where underlying data is missing
-                    return jsonify({"error": f"Could not evaluate formula, underlying data missing for {ticker}"}), 404
+                if result == "NOT_FOUND" or result is None:
+                    return jsonify({"error": f"Could not evaluate derived formula for {ticker}, underlying data missing or error."}), 404
+                
+                # Fetch formula for response (brief new session)
+                session_temp = Session()
+                derived_formula_obj = session_temp.query(DerivedTicker.formula).filter_by(ticker=ticker).first()
+                session_temp.close()
+                formula_val = derived_formula_obj.formula if derived_formula_obj else "N/A"
+
                 return jsonify({
-                    "ticker": ticker,
-                    "asset_type": "DERIVED",
-                    "price": result,
-                    "formula": derived.formula,
-                    "timestamp": datetime.datetime.now().isoformat() # Timestamp of calculation
+                    "ticker": ticker, "asset_type": "DERIVED", "price": result,
+                    "formula": formula_val, "timestamp": datetime.datetime.now().isoformat()
                 })
-            except ValueError as ve: # Catch specific evaluation errors like circular refs or missing data
-                 logger.warning(f"Evaluation error for derived ticker {ticker}: {ve}")
+            except ValueError as ve: # Specific errors from derived evaluation
+                 logger.warning(f"Evaluation error for derived ticker {ticker} (latest): {ve}")
                  return jsonify({"error": f"Error evaluating formula: {str(ve)}"}), 500
             except Exception as e:
-                logger.error(f"Unexpected error evaluating derived formula for {ticker}: {e}\n{traceback.format_exc()}")
+                logger.error(f"Unexpected error evaluating derived formula for {ticker} (latest): {e}\n{traceback.format_exc()}")
                 return jsonify({"error": f"Unexpected error evaluating formula: {str(e)}"}), 500
 
-        else: # Handle STOCK, CRYPTO, CURRENCY
-            asset_quote = session.query(AssetQuote).filter_by(ticker=ticker).first()
-            if not asset_quote:
-                return jsonify({"error": "Ticker definition not found in AssetQuote"}), 404
+        # If not a derived ticker, or if derived_check was None, proceed to AssetQuote
+        asset_quote = session.query(AssetQuote).filter_by(ticker=ticker).first()
+        if not asset_quote: # If not in DerivedTicker and not in AssetQuote
+            return jsonify({"error": "Ticker definition not found in AssetQuote or DerivedTickers"}), 404
 
-            # Determine correct DataSource method based on AssetQuote's from_asset_type
-            source_ticker = asset_quote.source_ticker
-            actual_asset_type = asset_quote.from_asset_type.upper()
-            data_source_name = asset_quote.data_source.name.upper() if asset_quote.data_source else "UNKNOWN"
+        actual_asset_type = asset_quote.from_asset_type.upper()
+        query_counter[(ticker, actual_asset_type)] += 1
+        
+        source_ticker_for_ds_call = asset_quote.source_ticker # Ticker used by the specific data source
+        data_source_name_from_db = asset_quote.data_source.name.upper() if asset_quote.data_source else "UNKNOWN"
+        
+        result = None
+        # Determine the cache key components: (DATA_SOURCE_NAME_CONST, key_used_in_cache)
+        ds_name_for_cache_key = None 
+        ticker_for_cache_key = None
 
-            result = None
-            if actual_asset_type == "STOCK":
-                result = StockDataSource.get_latest_price(source_ticker)
-            elif actual_asset_type == "CRYPTO":
-                result = CryptoDataSource.get_latest_price(source_ticker)
-            elif actual_asset_type == "CURRENCY":
-                result = CurrencyDataSource.get_latest_price(source_ticker)
-            else:
-                return jsonify({"error": f"Unsupported asset type '{actual_asset_type}' found for ticker '{ticker}'"}), 500
+        if actual_asset_type == "STOCK":
+            result = StockDataSource.get_latest_price(source_ticker_for_ds_call)
+            ds_name_for_cache_key = StockDataSource.DS_NAME
+            ticker_for_cache_key = source_ticker_for_ds_call
+        elif actual_asset_type == "CRYPTO":
+            result = CryptoDataSource.get_latest_price(source_ticker_for_ds_call)
+            ds_name_for_cache_key = CryptoDataSource.DS_NAME
+            ticker_for_cache_key = source_ticker_for_ds_call
+        elif actual_asset_type == "CURRENCY":
+            # For currency, get_latest_price expects the unified ticker (e.g., EURUSD)
+            result = CurrencyDataSource.get_latest_price(ticker) # Use the unified ticker for the call
+            ds_name_for_cache_key = CurrencyDataSource.OXR_DS_NAME # Cache is keyed by OXR source
+            ticker_for_cache_key = ticker # Cache key for currency uses unified ticker with OXR
+        else:
+            return jsonify({"error": f"Unsupported asset type '{actual_asset_type}' for ticker '{ticker}'"}), 500
 
-            if result == "NOT_FOUND":
-                 return jsonify({"error": f"Latest price not found via {data_source_name} for source ticker {source_ticker}"}), 404
-            elif isinstance(result, (int, float)):
-                # Fetch timestamp from cache if available
-                ds_key = (data_source_name, source_ticker)
-                cache_entry = latest_cache.get(ds_key)
-                timestamp = cache_entry[1].isoformat() if cache_entry and cache_entry[1] else datetime.datetime.now().isoformat() # Fallback timestamp
-
-                return jsonify({
-                    "ticker": ticker,
-                    "asset_type": actual_asset_type, # Return the actual type from AssetQuote
-                    "price": result,
-                    "timestamp": timestamp
-                })
-            else: # Should ideally not happen if NOT_FOUND is handled, but acts as a fallback
-                logger.error(f"Unexpected result type '{type(result)}' for {ticker} from {data_source_name}")
-                return jsonify({"error": "Unable to fetch latest price due to an unexpected error"}), 500
+        if result == "NOT_FOUND" or result is None:
+             # data_source_name_from_db refers to the source configured for historical usually
+             error_msg_source = data_source_name_from_db
+             if actual_asset_type == "CURRENCY": error_msg_source = CurrencyDataSource.OXR_DS_NAME # Clarify real-time source
+             return jsonify({"error": f"Latest price not found via {error_msg_source} for {ticker} (DS query key: {ticker_for_cache_key or source_ticker_for_ds_call})"}), 404
+        elif isinstance(result, (int, float)):
+            cache_timestamp_iso = datetime.datetime.now().isoformat() # Default if no cache entry found
+            if ds_name_for_cache_key and ticker_for_cache_key:
+                cache_key_tuple = (ds_name_for_cache_key, ticker_for_cache_key)
+                cache_entry = latest_cache.get(cache_key_tuple)
+                if cache_entry and cache_entry[1]: # cache_entry[1] is the timestamp object
+                    cache_timestamp_iso = cache_entry[1].isoformat()
+            
+            return jsonify({
+                "ticker": ticker, "asset_type": actual_asset_type, 
+                "price": result, "timestamp": cache_timestamp_iso
+            })
+        else: 
+            logger.error(f"Unexpected result type '{type(result)}' for {ticker} from {data_source_name_from_db}")
+            return jsonify({"error": "Unable to fetch latest price due to an unexpected data error"}), 500
 
     except Exception as e:
-        logger.error(f"Generic error in /api/latest for {ticker} ({asset_type}): {e}\n{traceback.format_exc()}")
+        logger.error(f"Generic error in /api/latest for {ticker} ({asset_type_param}): {e}\n{traceback.format_exc()}")
         return jsonify({"error": "An internal server error occurred"}), 500
     finally:
-        if session.is_active:
+        if session.is_active: 
             session.close()
-
 
 @app.route("/api/historical")
 def get_historical():
@@ -1175,7 +1201,6 @@ def home():
     # Redirect root to dashboard
     return render_template('dashboard.html') # Or redirect('/dashboard')
 
-# --- Main Execution ---
 if __name__ == "__main__":
     from models import Base, engine
 
@@ -1205,15 +1230,16 @@ if __name__ == "__main__":
 
     # --- Prepopulate & Initial Refresh ---
     try:
-        prepopulate_currency_assets() # Ensure USD, USDT etc. exist
+        prepopulate_currency_assets() # Ensures essential currencies like USD, EUR from CSV are in Asset table
         logger.info("Attempting initial cache refresh...")
-        refresh_all_latest_prices() # Populate cache on startup
-        logger.info("Initial cache refresh completed.")
-        load_query_counter() # Load historical query counts
+        refresh_all_latest_prices() # Populates stock/crypto cache (from yfinance, binance)
+        refresh_currency_prices() # Populates currency cache (from OpenExchangeRates and prepopulates assets if new ones found in OXR)
+        logger.info("Initial cache refreshes completed.")
+        load_query_counter() 
         logger.info(f"Loaded query counter with {len(query_counter)} items.")
     except Exception as startup_e:
-        logger.error(f"Error during startup data population/refresh: {startup_e}\n{traceback.format_exc()}")
-        # Decide if this is critical enough to stop startup
+        logger.error(f"Error during startup data population/refresh: {startup_e}", exc_info=True)
+        # Decide if this is critical enough to stop startup (likely yes for cache refresh)
 
     # --- Scheduler Setup ---
     from config import (FLASK_HOST, FLASK_PORT,
