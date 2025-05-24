@@ -6,7 +6,7 @@ import yfinance as yf
 from decimal import Decimal
 from utils import safe_convert, chunk_list
 import logging
-from config import HISTORICAL_START_DATE, REGULAR_TTL, NOT_FOUND_TTL # OXR_APP_ID imported in methods
+from config import CURRENCY_CACHE_TTL, HISTORICAL_START_DATE, REGULAR_TTL, NOT_FOUND_TTL # OXR_APP_ID imported in methods
 from cache_storage import latest_cache
 from dataclasses import dataclass # Added
 from typing import Dict, Optional # Added
@@ -473,7 +473,7 @@ class CurrencyDataSource:
                 cache_key = (CurrencyDataSource.OXR_DS_NAME, internal_pair_ticker)
                 
                 # Standard TTL for fetched rates
-                rate_expires = now + datetime.timedelta(minutes=REGULAR_TTL)
+                rate_expires = now + datetime.timedelta(minutes=CURRENCY_CACHE_TTL)
                 
                 latest_cache[cache_key] = (quote_to_usd_rate, now, rate_expires)
                 prices_updated_map[internal_pair_ticker] = quote_to_usd_rate
