@@ -1389,8 +1389,8 @@ def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL
 
         if sample_size is not None:
             try: # Wrap screen calls in try-except
-                result = yf.Tickers.screen(
-                    query, offset=0, size=sample_size)  # Use class method
+                result = yf.screener.screen(
+                    query, offset=0, size=sample_size)
                 quotes = result.get("quotes", [])
                 all_quotes_list.extend(quotes)
             except Exception as screen_err:
@@ -1400,7 +1400,7 @@ def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL
         else:
             while True:
                 try:
-                    result = yf.Tickers.screen(query, offset=offset, size=size)
+                    result = yf.screener.screen(query, offset=offset, size=size)
                     quotes = result.get("quotes", [])
                     if not quotes:
                         break
@@ -1415,7 +1415,11 @@ def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL
                     break  # Stop fetching on error
 
         quotes_df = pd.DataFrame(all_quotes_list)
-        symbols = quotes_df["symbol"].dropna().tolist()
+        if not quotes_df.empty and "symbol" in quotes_df.columns:
+            symbols = quotes_df["symbol"].dropna().tolist()
+        else:
+            logger.warning("No symbol data returned from yfinance screener.")
+            return quotes_df, {}
     else:
         logger.error("fetch_yf_data requires either a query or a ticker_list.")
         return pd.DataFrame(), {}
@@ -1427,7 +1431,10 @@ def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL
 
     # --- Fetch Historical Data ---
     historical_data = {}
-    symbols_to_download = quotes_df["symbol"].dropna().tolist() # Use symbols from the quotes actually gathered
+    if "symbol" not in quotes_df.columns:
+        logger.warning("Quotes DataFrame missing 'symbol' column; cannot fetch historical data.")
+        return quotes_df, {}
+    symbols_to_download = quotes_df["symbol"].dropna().tolist()  # Use symbols from the quotes actually gathered
     if not symbols_to_download:
         logger.warning("No symbols identified from quotes to download historical data.")
         return quotes_df, {}
