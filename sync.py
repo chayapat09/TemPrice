@@ -617,7 +617,9 @@ def delta_sync_currency(ticker=None):
 def refresh_stock_top_n_tickers(query_counter, top_n, delay_t):
     session = Session()
     try:
-        top_keys = [t[1] for t, count in query_counter.most_common(top_n) if t[0] == "STOCK"]
+        # query_counter uses (ticker, asset_type) as the key.
+        # We want the tickers for records where asset_type == "STOCK".
+        top_keys = [t[0] for t, count in query_counter.most_common(top_n) if t[1] == "STOCK"]
         asset_quotes = session.query(AssetQuote).filter(AssetQuote.ticker.in_(top_keys)).all()
     finally:
         session.close()
