@@ -90,19 +90,23 @@ def fetch_yf_data(max_tickers_per_request, delay_t, query, start_date=HISTORICAL
     offset = 0
     size = sample_size if sample_size is not None else 250
     if sample_size is not None:
-        result = yf.screen(query, offset=0, size=sample_size)
+        result = yf.screener.screen(query, offset=0, size=sample_size)
         quotes = result.get("quotes", [])
         all_quotes.extend(quotes)
     else:
         while True:
-            result = yf.screen(query, offset=offset, size=size)
+            result = yf.screener.screen(query, offset=offset, size=size)
             quotes = result.get("quotes", [])
             if not quotes:
                 break
             all_quotes.extend(quotes)
             offset += size
     quotes_df = pd.DataFrame(all_quotes)
-    symbols = [quote.get("symbol") for quote in all_quotes if quote.get("symbol")]
+    if not quotes_df.empty and "symbol" in quotes_df.columns:
+        symbols = quotes_df["symbol"].dropna().tolist()
+    else:
+        logger.warning("No symbol data returned from yfinance screener.")
+        return quotes_df, {}
     historical_data = {}
     for batch_symbols in chunk_list(symbols, max_tickers_per_request):
         tickers_str = " ".join(batch_symbols)
